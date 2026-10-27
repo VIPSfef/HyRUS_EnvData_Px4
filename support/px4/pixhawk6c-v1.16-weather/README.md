@@ -86,7 +86,9 @@ make -C "$PX4" px4_fmu-v6c_default -j6
 
 ## 빌드와 검증
 
-ARM 빌드 결과는 저장소의 `build/px4-fmu-v6c-v1.16-weather/`에 보관하며 `*.px4`가 업로드 파일, `*.elf`는 심볼 확인용입니다. `weather-build-info.json`에는 이미지·소스 해시, 보드 ID, 서브모듈, 메모리 사용량과 컴파일러를 기록합니다. 실제 보드 검증 기록은 [VERIFICATION.md](VERIFICATION.md)에 구분해 남깁니다.
+위 명령으로 새로 빌드한 업로드 파일은 `$PX4/build/px4_fmu-v6c_default/px4_fmu-v6c_default.px4`이며, 같은 빌드 폴더의 `*.elf`는 심볼 확인용입니다. 이 저장소 루트의 `build/native`는 PC용 단위 테스트만 만들고 보드 펌웨어를 만들지 않습니다.
+
+분리 이전의 검증 산출물은 기존 Router 작업 폴더의 Git 제외 경로 `build/px4-fmu-v6c-v1.16-weather/`에 보관돼 있습니다. 소스 분리 시 이 바이너리를 PX4 저장소로 복사하지 않았습니다. 당시 `weather-build-info.json`에는 이미지·소스 해시, 보드 ID, 서브모듈, 메모리 사용량과 컴파일러를 기록했습니다. 실제 보드 검증 기록은 [VERIFICATION.md](VERIFICATION.md)에 구분해 남깁니다.
 
 이 빌드의 컴파일러는 GCC 13.2.1로 공식 원본의 GCC 9.3.1과 다릅니다. 기존 비행 기능을 끄지 않고 Flash에 들어오는지 확인합니다. NuttX 코드는 기존과 같은 `886acbbdb4f061e5c0ce1a76afbcfa7cb7df9849`입니다. 새 작업 폴더의 버전 생성용 태그는 `nuttx-11.0.0`만 준비하여, 다른 최신 태그 때문에 OS 표시가 달라지는 것을 피했습니다.
 
