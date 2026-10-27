@@ -1,0 +1,14 @@
+/build/
+/PX4-Autopilot/
+/.venv/
+__pycache__/
+*.pyc
+*.px4
+*.bin
+*.elf
+*.ulg
+*.tlog
+*.log
+.env
+.env.*
+CMakeUserPresets.json
