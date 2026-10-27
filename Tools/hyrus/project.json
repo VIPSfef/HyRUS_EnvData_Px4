@@ -1,0 +1,7 @@
+{
+  "upstream_url": "https://github.com/PX4/PX4-Autopilot.git",
+  "upstream_branch": "main",
+  "baseline_commit": "6ea3539157ca358c70a515878b77077af7d4611d",
+  "px4_commit": "6ea3539157ca358c70a515878b77077af7d4611d",
+  "firmware_target": "px4_fmu-v6c_default"
+}

@@ -1,0 +1,9 @@
+# HyRUS addon for PX4's standard SD-card etc/extras.txt startup hook.
+# Merge this block into an existing extras.txt rather than replacing other addons.
+# Pixhawk 6C wiring used by this project: external I2C bus 2, SHTC3 address 0x70.
+# Change -b explicitly when the board or sensor connector uses a different bus.
+# SENS_EN_SHTC3 defaults to 0; enable it to start the sensor at boot.
+if param compare SENS_EN_SHTC3 1
+then
+	shtc3 -X -b 2 start
+fi

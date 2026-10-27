@@ -1,40 +1,70 @@
-# HyRUS_EnvData_Px4
+# HyRUS EnvData PX4
 
-PX4에서 I2C 환경 센서를 읽고 측정값을 MAVLink 메시지로 내보내는 펌웨어 확장입니다. SHTC3 드라이버, I2C 진단 코어, SENS_ATMOS 송신 스트림, PX4 버전별 오버레이와 검증 기록을 관리합니다.
+SHTC3 I2C 온습도 센서를 읽고 MAVLink로 전달하는 **PX4 공식 외부 모듈(Out-of-Tree)** 저장소입니다. 센서 소스는 이 저장소에서 관리하고, `EXTERNAL_MODULES_LOCATION`으로 PX4 빌드에 연결합니다. 결과물은 센서 모듈을 포함한 하나의 PX4 펌웨어입니다.
 
-서버 전송은 [HyRUS_EnvData_Router](https://github.com/VIPSfef/HyRUS_EnvData_Router)가 담당합니다. 이 저장소는 HTTP·UDP 서버 송신기와 PC 라우터를 포함하지 않습니다. 수신 측과 맞춰야 할 메시지 ID·단위·유효성은 [MAVLink 연결 규약](https://github.com/VIPSfef/HyRUS_EnvData_Router/blob/main/docs/PX4_MAVLINK_CONTRACT.md)을 기준으로 확인합니다.
+PC에서 MAVLink를 해석하고 HTTP·UDP로 서버에 전달하는 기능은 별도 [HyRUS_EnvData_Router](https://github.com/VIPSfef/HyRUS_EnvData_Router)가 담당합니다.
 
-```text
-I2C 센서 → PX4 드라이버/uORB → MAVLink carrier
-                                     ↓
-                            HyRUS_EnvData_Router → HTTP/UDP 서버
+```mermaid
+flowchart LR
+    H[HyRUS 외부 센서 모듈] -->|EXTERNAL_MODULES_LOCATION| B[PX4 빌드]
+    P[공식 PX4 고정 커밋] --> B
+    M[최소 MAVLink 패치] --> B
+    B --> F[Pixhawk 6C 펌웨어]
+    F -->|온습도 MAVLink| R[PC Router]
+    R --> S[서버 HTTP / UDP]
 ```
 
-## 구성과 펌웨어 적용
+## 소스 구성
 
-- `src/px4/shtc3`: SHTC3 측정과 CRC·프로토콜 코어
-- `src/px4/shtc3_probe`: 제품 ID·버스·CRC 진단
-- `src/px4/sens_atmos`: SENS_ATMOS 송신 스트림과 dialect
-- `support/px4`: 대상 PX4/MAVLink 커밋, 패치, 해시 검증과 오버레이 적용 도구
+| 경로 | 역할 |
+| --- | --- |
+| `src/CMakeLists.txt` | 공식 외부 모듈 목록과 빌드 연결 |
+| `src/drivers/hygrometer/shtc3/` | 센서 측정·오류 복구·uORB 발행 |
+| `src/systemcmds/shtc3_probe/` | I2C 제품 ID·CRC 진단 |
+| `mavlink/` | 온습도 스트림과 메시지 정의 연결 |
+| `patches/px4-mavlink.patch` | PX4 본체의 MAVLink 파일 4개에만 적용하는 변경 |
+| `sdcard/etc/extras.txt` | SD 카드 부팅 스크립트에 합칠 센서 시작 예제 |
+| `Tools/hyrus/project.json` | 검증 기준 PX4 커밋·보드·추적 브랜치 |
 
-실물 Pixhawk 6C의 PX4 1.16.0 구성은 [SHTC3 측정·송신 안내](support/px4/pixhawk6c-v1.16-weather/README.md)를 따릅니다. [전체 오버레이 안내](support/px4/README.md)는 다른 기준 커밋과 SITL 구성을 함께 설명합니다. 버전별 manifest를 혼용하지 마세요.
+기준 PX4는 v1.16.0의 `6ea3539157ca358c70a515878b77077af7d4611d`, 보드는 Pixhawk 6C의 `px4_fmu-v6c_default`입니다. 공식 개발 브랜치 `main`도 별도 후보로 검사합니다. 이전 오버레이 방식은 `archive/overlay-v1.16`에 보존합니다. PX4 전체 소스를 포함했던 작업본은 로컬 `archive/in-tree-v1.16` 브랜치에 보존하며 외부 모듈 저장소에는 게시하지 않습니다.
 
-기존 Router 저장소의 `src/px4`와 `support/px4`를 같은 상대 경로로 분리했기 때문에, manifest의 패치 경로와 SHA256은 그대로 유지됩니다. 실제 PX4 checkout과 비행 제어기에는 이 분리 작업으로 변경을 가하지 않았습니다. 패치 검사·적용·펌웨어 빌드·플래시는 각 안내의 별도 절차입니다.
+## 준비와 검증
 
-## 장치 없이 검증
-
-CMake 3.21 이상, C++ 컴파일러, Python 3, Git과 Ninja가 필요합니다.
+Ubuntu 또는 WSL2 Ubuntu의 **Linux 파일시스템**에서 실행합니다. 아래 명령의 시작 위치는 이 저장소 루트입니다. PX4 작업 경로는 전용 디렉터리로 지정하세요.
 
 ```sh
-cmake -S . -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build/native
-ctest --test-dir build/native --output-on-failure
+HYRUS_PX4_DIR="$HOME/src/PX4-HyRUS"
+python3 Tools/hyrus/firmware.py prepare --px4-dir "$HYRUS_PX4_DIR"
+bash "$HYRUS_PX4_DIR/Tools/setup/ubuntu.sh" --no-sim-tools
+python3 Tools/hyrus/validate.py --px4-dir "$HYRUS_PX4_DIR" --jobs 6
 ```
 
-이 검증은 SHTC3 프로토콜, 진단 코어, MAVLink 스트림 stub, 임시 Git 저장소에 대한 오버레이 안전성 테스트만 실행합니다. PX4 전체 펌웨어 빌드나 하드웨어 검증을 대신하지 않습니다.
+준비 도구는 설정에 고정된 공식 PX4와 하위 모듈을 준비하고 MAVLink 패치를 적용합니다. 검증 도구는 native 테스트, 실제 보드 펌웨어 빌드, 생성된 MAVLink 헤더를 사용하는 패킷 검사를 실행합니다. 명령 자체는 기체에 펌웨어를 설치하지 않습니다.
 
-## 온습도 관측을 시험하기
+준비된 PX4에서 펌웨어만 직접 빌드할 때는 공식 외부 모듈 옵션을 사용합니다.
 
-측정 이후의 PC 수신, 서버 전송, 시험 서버 실행은 [Router 실행 안내](https://github.com/VIPSfef/HyRUS_EnvData_Router#readme)와 [서버 API](https://github.com/VIPSfef/HyRUS_EnvData_Router/blob/main/docs/SERVER_API.md)를 참고하세요. WSL loopback 수신기를 사용하는 경우 송신·수신의 네트워크 환경을 맞춰야 합니다.
+```sh
+make -C "$HYRUS_PX4_DIR" px4_fmu-v6c_default \
+  "EXTERNAL_MODULES_LOCATION=\"$PWD\""
+```
 
-분리된 소스에는 아직 별도 프로젝트 전체 라이선스가 지정되지 않았습니다. PX4 등 기존 코드의 저작권 표시와 라이선스는 각 파일에 유지됩니다.
+출력 파일은 `$HYRUS_PX4_DIR/build/px4_fmu-v6c_default/px4_fmu-v6c_default.px4`입니다. 외부 모듈 경로는 CMake 설정에 남으므로 저장소를 옮겼다면 경로를 다시 설정해야 합니다.
+
+## 센서 시작
+
+자동 시작 예제는 외부 I2C **버스 2**, 주소 **`0x70`**의 SHTC3 한 개를 대상으로 합니다. 실제 보드·배선에 맞춰 버스 번호를 확인하세요. `SENS_EN_SHTC3` 기본값은 `0`이며, 예제는 이 값이 `1`일 때만 드라이버를 시작합니다.
+
+`sdcard/etc/extras.txt`의 내용을 SD 카드의 `/fs/microsd/etc/extras.txt`에 **기존 내용과 합쳐서** 넣습니다. 이미 있는 부팅 명령을 파일 복사로 덮어쓰지 마세요. 이 방식은 PX4의 `rc.sensors`를 수정하지 않습니다. 펌웨어 설치, SD 카드 편집, 파라미터 변경은 별도의 장치 적용 절차입니다.
+
+## 업데이트와 문서
+
+`hyrus-upstream.yml`은 공식 `main`의 새 커밋을 후보로 검사합니다. 패치 적용, 테스트 또는 펌웨어 빌드가 실패하면 검증 기준을 유지합니다. 통과한 경우에만 `project.json`의 PX4 커밋을 갱신하는 PR을 제안합니다. 자동 병합·기체 설치는 수행하지 않습니다.
+
+- [전체 빌드·데이터·실패 흐름](docs/architecture.md)
+- [기존 Firmware 포크와 공식 PX4 비교](docs/fork-comparison.md)
+- [자동 검사와 업데이트 운영 절차](Tools/hyrus/CI.md)
+- [변경 검증 workflow](.github/workflows/hyrus-ci.yml), [main 추적 workflow](.github/workflows/hyrus-upstream.yml)
+- [PX4 공식 외부 모듈 지침](https://docs.px4.io/main/en/advanced/out_of_tree_modules)
+- [PX4 공식 MAVLink 스트림 지침](https://docs.px4.io/main/en/mavlink/streaming_messages)
+
+이 문서는 사용 절차를 설명합니다. 이전 내장 방식의 빌드 성공을 현재 외부 모듈 방식의 검증 결과로 간주하지 마세요. 실제 통과 여부는 해당 커밋의 검증 보고서와 CI 기록으로 확인합니다. 전체 빌드 성공도 실제 I2C 동작·기체 운용 시험을 대신하지 않습니다.
