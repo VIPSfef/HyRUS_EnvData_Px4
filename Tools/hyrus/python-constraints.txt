@@ -1,0 +1,5 @@
+# PX4 v1.16's pinned DroneCAN generator imports pkg_resources.
+# Setuptools removed that API in v82. Keep the host build environment compatible
+# without changing the recorded PX4 or DroneCAN sources.
+# https://setuptools.pypa.io/en/stable/deprecated/pkg_resources.html
+setuptools>=39.2.0,<82

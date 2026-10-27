@@ -67,10 +67,11 @@ def prepare(root: Path, px4: Path, update_submodules: bool = True) -> dict:
     if git(px4, "cat-file", "-e", policy["px4_commit"] + "^{commit}", check=False).returncode:
         git(px4, "fetch", policy["upstream_url"], policy["px4_commit"])
     git(px4, "checkout", "--detach", policy["px4_commit"])
+    # Reject an incompatible upstream before downloading its submodule trees.
+    git(px4, "apply", "--check", str(patch))
     if update_submodules:
         git(px4, "submodule", "sync", "--recursive")
         subprocess.run(["git", "submodule", "update", "--init", "--recursive", "--jobs", "4"], cwd=px4, check=True)
-    git(px4, "apply", "--check", str(patch))
     git(px4, "apply", str(patch))
     verify_patch(root, px4, policy["px4_commit"])
     return policy

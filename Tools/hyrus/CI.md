@@ -34,11 +34,14 @@ external-module tree is required for a validation report.
 
 ~~~sh
 python3 Tools/hyrus/firmware.py prepare
-bash build/px4/Tools/setup/ubuntu.sh --no-sim-tools
+PIP_CONSTRAINT="$PWD/Tools/hyrus/python-constraints.txt" bash build/px4/Tools/setup/ubuntu.sh --no-sim-tools
 python3 Tools/hyrus/validate.py --jobs 4
 ~~~
 
 The official setup script installs development dependencies using sudo.
+The shared pip constraint preserves the legacy pkg_resources API required by
+the pinned DroneCAN generator. Setuptools 82 removed that API; this host-only
+constraint keeps the PX4 source patch limited to the four MAVLink files.
 An existing dedicated PX4 checkout can be selected with --px4-dir /path/to/PX4
 on both Python commands. It must be clean or contain exactly the reviewed
 MAVLink patch; arbitrary edits and untracked PX4 source are rejected and retained.
@@ -77,7 +80,7 @@ To inspect a candidate locally, use a disposable clean clone:
 python3 Tools/hyrus/upstream.py prepare --output build/hyrus-upstream
 # Continue only if candidate.json says changed=true and state=prepared.
 python3 Tools/hyrus/firmware.py prepare
-bash build/px4/Tools/setup/ubuntu.sh --no-sim-tools
+PIP_CONSTRAINT="$PWD/Tools/hyrus/python-constraints.txt" bash build/px4/Tools/setup/ubuntu.sh --no-sim-tools
 python3 Tools/hyrus/validate.py --output build/hyrus-upstream --jobs 4
 python3 Tools/hyrus/upstream.py package --output build/hyrus-upstream
 ~~~

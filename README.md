@@ -35,7 +35,8 @@ Ubuntu 또는 WSL2 Ubuntu의 **Linux 파일시스템**에서 실행합니다. �
 ```sh
 HYRUS_PX4_DIR="$HOME/src/PX4-HyRUS"
 python3 Tools/hyrus/firmware.py prepare --px4-dir "$HYRUS_PX4_DIR"
-bash "$HYRUS_PX4_DIR/Tools/setup/ubuntu.sh" --no-sim-tools
+PIP_CONSTRAINT="$PWD/Tools/hyrus/python-constraints.txt" \
+  bash "$HYRUS_PX4_DIR/Tools/setup/ubuntu.sh" --no-sim-tools
 python3 Tools/hyrus/validate.py --px4-dir "$HYRUS_PX4_DIR" --jobs 6
 ```
 
