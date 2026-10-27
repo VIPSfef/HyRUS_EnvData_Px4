@@ -52,11 +52,12 @@ Ubuntu 또는 WSL Ubuntu의 Linux 파일시스템에서 실행합니다. 시작 
 ```sh
 HYRUS_PX4_DIR="$HOME/src/PX4-HyRUS-R2026b-Verified"
 python3 Tools/hyrus/firmware.py prepare --profile r2026b --px4-dir "$HYRUS_PX4_DIR"
-bash "$HYRUS_PX4_DIR/Tools/setup/ubuntu.sh" --no-sim-tools
+PIP_CONSTRAINT="$PWD/Tools/hyrus/profiles/r2026b-python.txt" \
+  bash "$HYRUS_PX4_DIR/Tools/setup/ubuntu.sh" --no-sim-tools
 python3 Tools/hyrus/validate.py --profile r2026b --px4-dir "$HYRUS_PX4_DIR" --jobs 6
 ```
 
-공식 setup 스크립트는 `sudo`로 개발 의존성을 설치합니다. 선택한 포크의 requirements.txt가 필요한 Python 패키지 버전을 지정합니다. main을 검사할 때는 위 명령의 프로필을 `main`으로 바꾸고 별도 작업 폴더를 사용합니다.
+공식 setup 스크립트는 `sudo`로 개발 의존성을 설치합니다. 선택한 포크의 requirements.txt가 필요한 Python 패키지를 지정합니다. R2026b는 추가 제약 파일로 `setuptools 81.0.0`을 사용합니다. v1.16.1에 고정된 DroneCAN 생성기가 최신 setuptools에서 제거된 `pkg_resources`를 요구하기 때문이며, CI도 같은 파일을 사용합니다. main을 검사할 때는 프로필을 `main`으로 바꾸고 별도 작업 폴더를 사용하며 R2026b용 `PIP_CONSTRAINT`는 생략합니다.
 
 경로 옵션을 생략하면 다음처럼 서로 겹치지 않는 폴더를 사용합니다.
 

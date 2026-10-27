@@ -64,10 +64,20 @@ git -C "$HYRUS_PX4_DIR" submodule update --init --recursive
 개발 도구가 아직 준비되지 않았다면 MathWorks Hardware Setup의 도구 설치 단계를 따릅니다. MATLAB 없이 기본 펌웨어만 빌드하는 Ubuntu 환경에서는 해당 PX4 소스의 공식 설치 스크립트를 사용할 수 있습니다.
 
 ```sh
-bash "$HOME/src/PX4-HyRUS-R2026b/Tools/setup/ubuntu.sh" --no-sim-tools
+PIP_CONSTRAINT="$HOME/src/HyRUS_EnvData_Px4/Tools/hyrus/profiles/r2026b-python.txt" \
+  bash "$HOME/src/PX4-HyRUS-R2026b/Tools/setup/ubuntu.sh" --no-sim-tools
 ```
 
 필요한 도구는 Git, CMake·Ninja·Make, ARM GCC·newlib, 호스트 C/C++ 컴파일러, Python 3와 PX4 요구 패키지입니다. Python은 uORB/MAVLink 코드 생성과 펌웨어 포장에 사용하는 PC 도구이며, 센서 드라이버는 C/C++로 컴파일됩니다.
+
+v1.16.1의 기존 DroneCAN 생성기는 `pkg_resources`를 사용합니다. 위 제약 파일은 이를 포함하는 `setuptools 81.0.0`을 선택합니다. 최신 setuptools에서 해당 API가 제거되어 새 PC에서 빌드가 중단되는 문제를 막습니다. PX4 소스나 하위 모듈을 고치는 방식은 아닙니다. [setuptools 변경 내역](https://setuptools.pypa.io/en/stable/history.html#v82-0-0)
+
+MathWorks 도구 설치를 이미 마쳤다면, **같은 WSL 배포판의 빌드용 Python**에도 다음 호환 의존성을 적용합니다. 이 명령의 `PIP_BREAK_SYSTEM_PACKAGES`는 Ubuntu 24.04 등의 Python 패키지 설치 정책에 대응하며, PX4 공식 설치 스크립트와 같은 범위에서 빌드 도구를 설치합니다.
+
+```sh
+PIP_BREAK_SYSTEM_PACKAGES=1 python3 -m pip install \
+  -r "$HOME/src/HyRUS_EnvData_Px4/Tools/hyrus/profiles/r2026b-python.txt"
+```
 
 ## 4. 먼저 기본 펌웨어 빌드
 
@@ -194,6 +204,7 @@ Git에 보존할 것은 **모델 원본과 설정, 센서 저장소 커밋, PX4 
 
 | 증상 | 먼저 확인할 것 |
 | --- | --- |
+| `No module named 'pkg_resources'` | 3절의 `r2026b-python.txt`를 실제 빌드용 Python에 설치했는지 |
 | CMake 캐시가 다른 작업본이라고 표시 | PX4 경로·보드·외부 모듈 경로가 같은지, 새 출력 폴더가 필요한지 |
 | `px4_simulink_app`가 없다고 표시 | 같은 PX4 작업본에서 모델을 Build했는지 |
 | 생성 모듈 소스는 있는데 최종 링크 검사 실패 | Simulink와 셸의 CMake 보드 구성이 같은지 |

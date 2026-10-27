@@ -43,7 +43,11 @@ jobs:
           mkdir -p "$HYRUS_RESULTS_DIR"
           python3 Tools/hyrus/firmware.py prepare --profile "$HYRUS_PROFILE" --px4-dir "$HYRUS_PX4_DIR" 2>&1 | tee "$HYRUS_RESULTS_DIR/prepare.log"
       - name: Install official PX4 build dependencies
-        run: bash "$HYRUS_PX4_DIR/Tools/setup/ubuntu.sh" --no-sim-tools
+        run: |
+          if [[ "$HYRUS_PROFILE" == r2026b ]]; then
+            export PIP_CONSTRAINT="$GITHUB_WORKSPACE/Tools/hyrus/profiles/r2026b-python.txt"
+          fi
+          bash "$HYRUS_PX4_DIR/Tools/setup/ubuntu.sh" --no-sim-tools
       - name: Check native protocols and build complete ARM firmware
         run: python3 Tools/hyrus/validate.py --profile "$HYRUS_PROFILE" --px4-dir "$HYRUS_PX4_DIR" --output "$HYRUS_RESULTS_DIR" --jobs 2
       - name: Keep validation results, logs and firmware

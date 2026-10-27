@@ -47,6 +47,9 @@ git -C "$HYRUS_PX4_DIR" fetch --no-recurse-submodules --filter=blob:none --tags 
 git -C "$HYRUS_PX4_DIR" submodule update --init --recursive
 
 cd "$HOME/src/HyRUS_EnvData_Px4"
+# PX4 v1.16.1의 기존 코드 생성기와 호환되는 Python 패키지입니다.
+PIP_BREAK_SYSTEM_PACKAGES=1 python3 -m pip install \
+  -r Tools/hyrus/profiles/r2026b-python.txt
 bash Tools/hyrus/build.sh \
   --px4-dir "$HYRUS_PX4_DIR" \
   --target px4_fmu-v6c_default \
