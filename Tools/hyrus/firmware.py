@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 import subprocess
 import sys
-from ci_common import INTEGRATION_PATHS, fail, git, git_text, read_policy, require_clean_checkout
+from ci_common import INTEGRATION_PATHS, PROFILES, fail, firmware_profile, git, git_text, read_policy, require_clean_checkout
 
 MODULE_FILES = (
     "src/CMakeLists.txt", "src/drivers/hygrometer/shtc3/CMakeLists.txt",
@@ -21,15 +21,15 @@ def require_clean_firmware(px4: Path) -> None:
         raise ValueError("PX4 submodules contain local changes; existing work is preserved")
 
 
-def verify_fork(root: Path, px4: Path, policy: dict | None = None) -> list[str]:
+def verify_fork(root: Path, px4: Path, policy: dict | None = None, *, profile: str = "main") -> list[str]:
     """Check source identity, ancestry and the complete fork delta, without editing it."""
-    policy = policy or read_policy(root)
+    policy = policy or read_policy(root, profile)
     for name in MODULE_FILES:
         if not (root / name).is_file():
             raise ValueError("External module source missing: " + name)
     require_clean_firmware(px4)
     if git_text(px4, "rev-parse", "HEAD") != policy["px4_commit"]:
-        raise ValueError("PX4 checkout does not match project.json px4_commit")
+        raise ValueError("PX4 checkout does not match the selected manifest's px4_commit")
     if git(px4, "merge-base", "--is-ancestor", policy["upstream_commit"], policy["px4_commit"], check=False).returncode:
         raise ValueError("The recorded official upstream commit is not an ancestor of the fork")
     changed = git_text(px4, "diff", "--no-renames", "--name-only",
@@ -40,8 +40,9 @@ def verify_fork(root: Path, px4: Path, policy: dict | None = None) -> list[str]:
     return changed
 
 
-def prepare(root: Path, px4: Path, update_submodules: bool = True) -> dict:
-    policy = read_policy(root)
+def prepare(root: Path, px4: Path, update_submodules: bool = True, *, profile: str = "main") -> dict:
+    selected = firmware_profile(profile)
+    policy = read_policy(root, profile)
     px4 = px4.resolve()
     if px4 == root or root.is_relative_to(px4):
         raise ValueError("PX4 checkout must be separate from the external module repository")
@@ -61,8 +62,12 @@ def prepare(root: Path, px4: Path, update_submodules: bool = True) -> dict:
     # Fork tags can lag behind its branch. PX4 derives version metadata from
     # official tags, so fetch them without changing the selected firmware pin.
     git(px4, "fetch", "--no-recurse-submodules", "--filter=blob:none", "--tags",
-        policy["upstream_url"], "refs/heads/" + policy["upstream_branch"])
-    if git(px4, "merge-base", "--is-ancestor", policy["upstream_commit"], "FETCH_HEAD", check=False).returncode:
+        policy["upstream_url"], selected.upstream_ref)
+    official = git_text(px4, "rev-parse", "FETCH_HEAD^{commit}")
+    if selected.upstream_ref.startswith("refs/tags/"):
+        if policy["upstream_commit"] != official:
+            raise ValueError("The recorded upstream commit does not match the fetched official release tag")
+    elif git(px4, "merge-base", "--is-ancestor", policy["upstream_commit"], official, check=False).returncode:
         raise ValueError("The recorded upstream commit is outside the fetched official main history")
     git(px4, "checkout", "--detach", policy["px4_commit"])
     # Source is committed in the fork. Never apply patches or copy drivers here.
@@ -80,10 +85,12 @@ def main() -> int:
     parser.add_argument("action", choices=("prepare",))
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--px4-dir", type=Path)
+    parser.add_argument("--profile", choices=PROFILES, default="main")
     args = parser.parse_args()
     root = args.repo.resolve()
     try:
-        prepare(root, (args.px4_dir or root / "build/px4").resolve())
+        selected = firmware_profile(args.profile)
+        prepare(root, (args.px4_dir or selected.build_dir(root, "px4")).resolve(), profile=args.profile)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         fail(error)
         return 1

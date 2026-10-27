@@ -1,0 +1,9 @@
+{
+  "upstream_url": "https://github.com/PX4/PX4-Autopilot.git",
+  "upstream_ref": "refs/tags/v1.16.1",
+  "upstream_commit": "94cb2012792b2ae89f0b147cfee53ee31ae550be",
+  "fork_url": "https://github.com/VIPSfef/Firmware.git",
+  "fork_branch": "hyrus/r2026b",
+  "px4_commit": "5c54f2e0c0ec4ce6ac8b943a025b483796561062",
+  "firmware_target": "px4_fmu-v6c_default"
+}

@@ -19,9 +19,17 @@ concurrency:
 
 jobs:
   firmware:
-    name: Native tests and Pixhawk 6C firmware
+    name: ${{ matrix.profile }} - Native tests and Pixhawk 6C firmware
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [main, r2026b]
+    env:
+      HYRUS_PROFILE: ${{ matrix.profile }}
+      HYRUS_PX4_DIR: build/ci-${{ matrix.profile }}/px4
+      HYRUS_RESULTS_DIR: build/ci-${{ matrix.profile }}/results
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -32,17 +40,17 @@ jobs:
           python-version: '3.12'
       - name: Prepare the pinned PX4 fork and submodules
         run: |
-          mkdir -p build/hyrus-ci
-          python3 Tools/hyrus/firmware.py prepare 2>&1 | tee build/hyrus-ci/prepare.log
+          mkdir -p "$HYRUS_RESULTS_DIR"
+          python3 Tools/hyrus/firmware.py prepare --profile "$HYRUS_PROFILE" --px4-dir "$HYRUS_PX4_DIR" 2>&1 | tee "$HYRUS_RESULTS_DIR/prepare.log"
       - name: Install official PX4 build dependencies
-        run: bash build/px4/Tools/setup/ubuntu.sh --no-sim-tools
+        run: bash "$HYRUS_PX4_DIR/Tools/setup/ubuntu.sh" --no-sim-tools
       - name: Check native protocols and build complete ARM firmware
-        run: python3 Tools/hyrus/validate.py --output build/hyrus-ci --jobs 2
+        run: python3 Tools/hyrus/validate.py --profile "$HYRUS_PROFILE" --px4-dir "$HYRUS_PX4_DIR" --output "$HYRUS_RESULTS_DIR" --jobs 2
       - name: Keep validation results, logs and firmware
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: hyrus-firmware-${{ github.sha }}-${{ github.run_attempt }}
-          path: build/hyrus-ci/
+          name: hyrus-firmware-${{ matrix.profile }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ env.HYRUS_RESULTS_DIR }}/
           if-no-files-found: warn
           retention-days: 14

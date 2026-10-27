@@ -22,13 +22,20 @@ endif()
 
 load_cache("${HYRUS_BUILD_DIR}" READ_WITH_PREFIX _previous_
     CMAKE_HOME_DIRECTORY EXTERNAL_MODULES_LOCATION CONFIG CMAKE_GENERATOR)
-foreach(_key CMAKE_HOME_DIRECTORY EXTERNAL_MODULES_LOCATION CONFIG CMAKE_GENERATOR)
+foreach(_key CMAKE_HOME_DIRECTORY CONFIG CMAKE_GENERATOR)
     if(NOT DEFINED _previous_${_key} OR "${_previous_${_key}}" STREQUAL "")
         message(FATAL_ERROR "Existing CMake cache lacks ${_key}; select a new --build-dir")
     endif()
 endforeach()
 file(REAL_PATH "${_previous_CMAKE_HOME_DIRECTORY}" _previous_source)
-file(REAL_PATH "${_previous_EXTERNAL_MODULES_LOCATION}" _previous_external)
+if(NOT DEFINED _previous_EXTERNAL_MODULES_LOCATION OR "${_previous_EXTERNAL_MODULES_LOCATION}" STREQUAL "")
+    if(NOT HYRUS_ALLOW_EMPTY_EXTERNAL)
+        message(FATAL_ERROR "Existing CMake cache lacks EXTERNAL_MODULES_LOCATION; select a new --build-dir or use --simulink to attach to a matching build")
+    endif()
+    set(_previous_external "${HYRUS_EXTERNAL_SOURCE}")
+else()
+    file(REAL_PATH "${_previous_EXTERNAL_MODULES_LOCATION}" _previous_external)
+endif()
 if(NOT "${_previous_source}" STREQUAL "${HYRUS_PX4_SOURCE}"
    OR NOT "${_previous_external}" STREQUAL "${HYRUS_EXTERNAL_SOURCE}"
    OR NOT "${_previous_CONFIG}" STREQUAL "${HYRUS_TARGET}"

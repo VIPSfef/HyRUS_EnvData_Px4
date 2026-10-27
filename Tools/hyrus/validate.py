@@ -6,7 +6,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-from ci_common import check_device_type, check_history, check_workflows, fail, git_text, json_write, logged, read_policy, require_clean_checkout
+from ci_common import PROFILES, check_device_type, check_history, check_workflows, fail, firmware_profile, git_text, json_write, logged, read_policy, require_clean_checkout
 from firmware import prepare, verify_fork
 
 
@@ -20,10 +20,12 @@ def verify_source_snapshot(root: Path, px4: Path, source_commit: str, submodules
         raise ValueError("PX4 submodule commits changed during validation")
 
 
-def validate(root: Path, px4: Path, output: Path, jobs: int) -> dict:
-    policy = read_policy(root)
+def validate(root: Path, px4: Path, output: Path, jobs: int, *, profile: str = "main") -> dict:
+    selected = firmware_profile(profile)
+    policy = read_policy(root, profile)
     target = policy["firmware_target"]
-    report = {"format": "hyrus-compatibility/v3", "source_commit": git_text(root, "rev-parse", "HEAD"),
+    report = {"format": "hyrus-compatibility/v4", "profile": profile,
+              "upstream_ref": selected.upstream_ref, "source_commit": git_text(root, "rev-parse", "HEAD"),
               "px4_commit": policy["px4_commit"], "firmware_target": target,
               "upstream_commit": policy["upstream_commit"], "fork_url": policy["fork_url"],
               "passed": False, "completed_checks": [],
@@ -33,7 +35,7 @@ def validate(root: Path, px4: Path, output: Path, jobs: int) -> dict:
         check_workflows(root)
         if git_text(root, "status", "--porcelain"):
             raise ValueError("Validation requires a clean committed external-module checkout")
-        prepare(root, px4)
+        prepare(root, px4, profile=profile)
         report["integration_paths"] = verify_fork(root, px4, policy)
         report["completed_checks"].append("external_source_and_committed_fork")
         report["device_type"] = check_device_type(root, px4)
@@ -43,7 +45,7 @@ def validate(root: Path, px4: Path, output: Path, jobs: int) -> dict:
         if any(line.startswith(("-", "+", "U")) for line in report["submodules"]):
             raise ValueError("PX4 submodules are not at their recorded commits")
         report["completed_checks"].append("version_history")
-        native = root / "build/hyrus-native"
+        native = selected.build_dir(root, "hyrus-native")
         firmware_build = px4 / "build" / target
         commands = [
             ("workflow_helpers", root, [sys.executable, "-m", "unittest", "discover", "-s", "Tools/hyrus/tests", "-v"]),
@@ -100,15 +102,19 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--px4-dir", type=Path)
-    parser.add_argument("--output", type=Path, default=Path("build/hyrus-ci"))
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--profile", choices=PROFILES, default="main")
     parser.add_argument("--jobs", type=int, default=2)
     args = parser.parse_args()
     root = args.repo.resolve()
-    output = args.output if args.output.is_absolute() else root / args.output
+    selected = firmware_profile(args.profile)
+    output = args.output or selected.build_dir(root, "hyrus-ci")
+    output = output if output.is_absolute() else root / output
     if not 1 <= args.jobs <= 32:
         parser.error("--jobs must be in 1..32")
     try:
-        validate(root, (args.px4_dir or root / "build/px4").resolve(), output.resolve(), args.jobs)
+        validate(root, (args.px4_dir or selected.build_dir(root, "px4")).resolve(), output.resolve(),
+                 args.jobs, profile=args.profile)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         fail(error)
         return 1

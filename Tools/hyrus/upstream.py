@@ -53,7 +53,8 @@ def check_fork_candidate(px4: Path, fork_base: str, upstream: str, candidate: st
 
 
 def prepare(root: Path, output: Path, px4: Path | None = None) -> dict:
-    policy = read_policy(root)
+    # Scheduled updates always follow main; a stable Simulink pin is never moved.
+    policy = read_policy(root, "main")
     check_workflows(root)
     if git_text(root, "status", "--porcelain"):
         raise ValueError("Prepare requires a clean external-module checkout")
@@ -129,7 +130,8 @@ def package(root: Path, output: Path, px4: Path | None = None) -> None:
     head = git_text(root, "rev-parse", "HEAD")
     if report.get("state") != "prepared" or report.get("candidate") != head:
         raise ValueError("HEAD is not the prepared candidate")
-    if (not validation.get("passed") or validation.get("source_commit") != head
+    if (not validation.get("passed") or validation.get("profile") != "main"
+            or validation.get("source_commit") != head
             or validation.get("px4_commit") != report["fork_candidate"]
             or validation.get("upstream_commit") != report["upstream"]):
         raise ValueError("The exact module candidate and fork/upstream pair have not passed validation")

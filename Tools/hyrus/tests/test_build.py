@@ -41,6 +41,12 @@ class DirectBuildTests(unittest.TestCase):
         for name in ("ninja", "make", "python3", "gcc", "g++", "arm-none-eabi-gcc", "arm-none-eabi-g++"):
             self.tool(name, "import sys\nsys.exit(0)\n")
         self.tool("nproc", "print(3)\n")
+        self.tool("arm-none-eabi-nm", """import os
+print(os.environ.get('HYRUS_TEST_SYMBOLS', '''08000000 T px4_simulink_app_main
+08000010 T shtc3_main
+08000020 T shtc3_probe_main
+08000030 T _ZN22MavlinkStreamSensAtmos4sendEv'''))
+""")
         self.tool("git", """import json, os, sys
 from pathlib import Path
 args = sys.argv[1:]
@@ -67,6 +73,7 @@ if '--build' in args:
     target = next(line.split('=', 1)[1] for line in (directory / 'CMakeCache.txt').read_text().splitlines() if line.startswith('CONFIG:'))
     if not os.environ.get('HYRUS_TEST_NO_IMAGE'):
         (directory / (target + '.px4')).write_bytes(b'firmware fixture')
+        (directory / (target + '.elf')).write_bytes(b'ELF fixture')
 else:
     directory = Path(args[args.index('-B') + 1])
     directory.mkdir(parents=True, exist_ok=True)
@@ -89,6 +96,11 @@ else:
     def commands(self, tool=None):
         commands = [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
         return [command for command in commands if tool is None or command[0] == tool]
+
+    def generated_model(self):
+        module = self.px4 / "src/modules/px4_simulink_app"
+        module.mkdir(parents=True)
+        (module / "CMakeLists.txt").write_text("# Generated model fixture\n")
 
     def test_help_needs_no_toolchain(self):
         result = self.run_build("--help", PATH="")
@@ -191,6 +203,56 @@ else:
                 result = self.run_build("--", argument)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(self.commands("cmake"), [])
+
+    def test_simulink_build_requires_generated_model_source(self):
+        result = self.run_build("--simulink")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Generate the Simulink model", result.stderr)
+        self.assertEqual(self.commands("cmake"), [])
+
+    def test_simulink_links_generated_model_and_sensor_modules(self):
+        self.generated_model()
+        result = self.run_build("--simulink")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Verified linked modules", result.stdout)
+        self.assertIn("-DHYRUS_MAVLINK:BOOL=ON", self.commands("cmake")[0])
+
+    def test_simulink_rejects_firmware_missing_any_required_module(self):
+        self.generated_model()
+        symbols = ["px4_simulink_app_main", "shtc3_main", "shtc3_probe_main", "_ZN22MavlinkStreamSensAtmos4sendEv"]
+        for missing in symbols:
+            with self.subTest(missing=missing):
+                output = "\n".join("08000000 T " + name for name in symbols if name != missing)
+                result = self.run_build("--simulink", HYRUS_TEST_SYMBOLS=output)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Required module is absent", result.stderr)
+
+    def test_simulink_can_attach_to_matching_cache_without_external_modules(self):
+        self.assertEqual(self.run_build("--configure-only").returncode, 0)
+        cache = self.px4 / "build/fixture_board_default/CMakeCache.txt"
+        text = cache.read_text().replace("EXTERNAL_MODULES_LOCATION:PATH=" + str(self.root), "EXTERNAL_MODULES_LOCATION:PATH=")
+        cache.write_text(text)
+        ordinary = self.run_build("--configure-only")
+        self.assertNotEqual(ordinary.returncode, 0)
+        self.assertEqual(cache.read_text(), text)
+        attached = self.run_build("--simulink", "--configure-only")
+        self.assertEqual(attached.returncode, 0, attached.stderr)
+        self.assertIn(str(self.root), cache.read_text())
+
+    def test_simulink_preserves_another_external_module_configuration(self):
+        self.assertEqual(self.run_build("--configure-only").returncode, 0)
+        cache = self.px4 / "build/fixture_board_default/CMakeCache.txt"
+        original = cache.read_text().replace(str(self.root), str(self.base / "other modules"))
+        cache.write_text(original)
+        result = self.run_build("--simulink", "--configure-only")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(cache.read_text(), original)
+
+    def test_simulink_cannot_disable_mavlink(self):
+        result = self.run_build("--simulink", "--configure-only", "--", "-DHYRUS_MAVLINK=OFF")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires HYRUS_MAVLINK=ON", result.stderr)
+        self.assertEqual(self.commands("cmake"), [])
 
 
 if __name__ == "__main__":

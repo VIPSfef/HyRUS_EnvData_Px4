@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import ci_common
-from ci_common import POLICY_PATH, check_device_type, git, git_text, json_write
+from ci_common import POLICY_PATH, check_device_type, firmware_profile, git, git_text, json_write, read_policy
 from firmware import MODULE_FILES, prepare as firmware_prepare, require_clean_firmware, verify_fork
 from upstream import check_pin_candidate, package, prepare
 from validate import verify_source_snapshot
@@ -87,8 +87,19 @@ class ExternalFirmwareTests(unittest.TestCase):
         self.advance()
         return prepare(self.root, self.output, self.px4)
 
+    def stable_policy(self):
+        selected = firmware_profile("r2026b")
+        git(self.source, "tag", "-a", "v1.16.1", self.upstream_pin, "-m", "Official release")
+        git(self.fork, "branch", selected.fork_branch, self.fork_pin)
+        policy = dict(self.policy, upstream_ref=selected.upstream_ref, fork_branch=selected.fork_branch)
+        del policy["upstream_branch"]
+        json_write(self.root / selected.manifest, policy)
+        self.commit(self.root, "Stable Simulink profile")
+        self.external_base = git_text(self.root, "rev-parse", "HEAD")
+        return policy
+
     def record_validation(self, report, **overrides):
-        result = {"passed": True, "source_commit": report["candidate"],
+        result = {"passed": True, "profile": "main", "source_commit": report["candidate"],
                   "px4_commit": report["fork_candidate"], "upstream_commit": report["upstream"]}
         result.update(overrides)
         json_write(self.output / "validation.json", result)
@@ -120,6 +131,56 @@ class ExternalFirmwareTests(unittest.TestCase):
         firmware_prepare(self.root, fresh, update_submodules=False)
         self.assertEqual(git_text(fresh, "remote", "get-url", "origin"), str(self.fork))
         self.assertEqual(git_text(fresh, "rev-parse", "HEAD"), self.fork_pin)
+
+    def test_stable_profile_uses_annotated_release_tag_even_after_main_advances(self):
+        stable = self.stable_policy()
+        self.advance()
+        fresh = self.base_dir / "stable checkout"
+        firmware_prepare(self.root, fresh, update_submodules=False, profile="r2026b")
+        self.assertEqual(git_text(fresh, "rev-parse", "HEAD"), self.fork_pin)
+        self.assertEqual(git_text(fresh, "rev-parse", "v1.16.1^{commit}"), self.upstream_pin)
+        self.assertEqual(verify_fork(self.root, fresh, profile="r2026b"),
+                         ["src/modules/mavlink/CMakeLists.txt"])
+        self.assertEqual(read_policy(self.root, "r2026b"), stable)
+        self.assertEqual(read_policy(self.root), self.policy)
+
+    def test_stable_profile_rejects_wrong_release_commit_without_moving_checkout(self):
+        stable = self.stable_policy()
+        stable["upstream_commit"] = self.advance()
+        json_write(self.root / firmware_profile("r2026b").manifest, stable)
+        with self.assertRaisesRegex(ValueError, "does not match the fetched official release tag"):
+            firmware_prepare(self.root, self.px4, update_submodules=False, profile="r2026b")
+        self.assertEqual(git_text(self.px4, "rev-parse", "HEAD"), self.fork_pin)
+        self.assertEqual(git_text(self.px4, "status", "--porcelain"), "")
+
+    def test_stable_profile_rejects_moving_main_reference_and_wrong_fork_branch(self):
+        stable = self.stable_policy()
+        path = self.root / firmware_profile("r2026b").manifest
+        for changes, message in (({"upstream_ref": "refs/heads/main"}, "official PX4 refs/tags/v1.16.1"),
+                                 ({"fork_branch": ci_common.FORK_BRANCH}, "firmware branch hyrus/r2026b")):
+            with self.subTest(changes=changes):
+                json_write(path, dict(stable, **changes))
+                with self.assertRaisesRegex(ValueError, message):
+                    read_policy(self.root, "r2026b")
+
+    def test_profiles_keep_separate_default_sources_native_caches_and_results(self):
+        for stem in ("px4", "hyrus-native", "hyrus-ci"):
+            with self.subTest(stem=stem):
+                main = firmware_profile().build_dir(self.root, stem)
+                stable = firmware_profile("r2026b").build_dir(self.root, stem)
+                self.assertEqual(main, self.root / "build" / stem)
+                self.assertEqual(stable, self.root / "build" / (stem + "-r2026b"))
+                self.assertNotEqual(main, stable)
+        with self.assertRaisesRegex(ValueError, "Unknown firmware profile"):
+            read_policy(self.root, "../other")
+
+    def test_main_candidate_does_not_change_stable_manifest(self):
+        stable = self.stable_policy()
+        report = self.candidate()
+        self.assertTrue(report["changed"])
+        self.assertEqual(read_policy(self.root, "r2026b"), stable)
+        self.assertEqual(git_text(self.root, "diff", "--name-only", self.external_base, report["candidate"]),
+                         POLICY_PATH)
 
     def test_unrelated_px4_edit_is_preserved_and_refused(self):
         path = self.px4 / "src/modules/mavlink/CMakeLists.txt"
@@ -268,6 +329,13 @@ class ExternalFirmwareTests(unittest.TestCase):
     def test_stale_validation_is_refused(self):
         report = self.candidate()
         self.record_validation(report, px4_commit=self.fork_pin)
+        with self.assertRaisesRegex(ValueError, "exact module"):
+            package(self.root, self.output, self.px4)
+        self.assertFalse((self.output / "candidate.bundle").exists())
+
+    def test_stable_validation_cannot_approve_main_candidate(self):
+        report = self.candidate()
+        self.record_validation(report, profile="r2026b")
         with self.assertRaisesRegex(ValueError, "exact module"):
             package(self.root, self.output, self.px4)
         self.assertFalse((self.output / "candidate.bundle").exists())

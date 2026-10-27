@@ -1,5 +1,6 @@
 """Shared policy and execution for standalone HyRUS external modules."""
 from __future__ import annotations
+from dataclasses import dataclass
 import json
 from pathlib import Path
 import re
@@ -19,6 +20,31 @@ INTEGRATION_PATHS = frozenset("src/modules/mavlink/" + name for name in (
     "streams/HYGROMETER_SENSOR.hpp"))
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 
+
+@dataclass(frozen=True)
+class FirmwareProfile:
+    manifest: str
+    upstream_ref: str
+    fork_branch: str
+    build_suffix: str = ""
+
+    def build_dir(self, root: Path, stem: str) -> Path:
+        return root / "build" / (stem + self.build_suffix)
+
+
+PROFILES = {
+    "main": FirmwareProfile(POLICY_PATH, "refs/heads/main", FORK_BRANCH),
+    "r2026b": FirmwareProfile("Tools/hyrus/profiles/r2026b.json", "refs/tags/v1.16.1",
+                              "hyrus/r2026b", "-r2026b"),
+}
+
+
+def firmware_profile(name: str = "main") -> FirmwareProfile:
+    try:
+        return PROFILES[name]
+    except KeyError:
+        raise ValueError("Unknown firmware profile: " + name) from None
+
 def git(root: Path, *arguments: str, check: bool = True, env: dict | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *arguments], cwd=root, check=check, text=True,
                           encoding="utf-8", stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
@@ -26,12 +52,16 @@ def git(root: Path, *arguments: str, check: bool = True, env: dict | None = None
 def git_text(root: Path, *arguments: str) -> str:
     return git(root, *arguments).stdout.strip()
 
-def read_policy(root: Path) -> dict:
-    policy = json.loads((root / POLICY_PATH).read_text(encoding="utf-8"))
-    if policy.get("upstream_url") != UPSTREAM_URL or policy.get("upstream_branch") != "main":
-        raise ValueError("Only official PX4 main is supported")
-    if policy.get("fork_url") != FORK_URL or policy.get("fork_branch") != FORK_BRANCH:
-        raise ValueError("Only the HyRUS MAVLink firmware fork is supported")
+def read_policy(root: Path, profile: str = "main") -> dict:
+    selected = firmware_profile(profile)
+    policy = json.loads((root / selected.manifest).read_text(encoding="utf-8"))
+    reference = policy.get("upstream_ref")
+    if reference is None and policy.get("upstream_branch"):
+        reference = "refs/heads/" + policy["upstream_branch"]
+    if policy.get("upstream_url") != UPSTREAM_URL or reference != selected.upstream_ref:
+        raise ValueError("Profile requires official PX4 " + selected.upstream_ref)
+    if policy.get("fork_url") != FORK_URL or policy.get("fork_branch") != selected.fork_branch:
+        raise ValueError("Profile requires the HyRUS firmware branch " + selected.fork_branch)
     for key in ("upstream_commit", "px4_commit"):
         if not SHA.fullmatch(policy.get(key, "")):
             raise ValueError(key + " must be a full commit SHA")
