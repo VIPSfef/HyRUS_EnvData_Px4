@@ -147,6 +147,38 @@ git status --short에 변경이 표시되면 먼저 정리하고 진행하세요
 
 이식 이후에는 사용자가 선택한 펌웨어의 원본 브랜치를 surveyor-integration에 병합해 업데이트합니다. MAVLink 확장 커밋을 유지하고 다시 빌드·시험합니다. 새 addon 버전을 적용할 때는 이미 들어간 확장과의 차이를 검토해야 합니다.
 
+## Simulink로 만든 PX4 커스텀 펌웨어와 함께 사용
+
+이 경우 기준 펌웨어는 **사용하는 MATLAB 릴리스와 PX4 지원 패키지가 요구하는 버전**입니다. 공식 main 추적용 작업본과 별도의 Git 브랜치·작업 폴더에서 관리합니다. 예를 들어 2026-10-27에 확인한 MathWorks R2026b 문서는 PX4 v1.16.1을 요구합니다. 실제 설치한 릴리스의 지침을 먼저 확인하세요. [MathWorks의 PX4 소스 준비 지침](https://www.mathworks.com/help/uav/px4/ug/downloading-px4-source-code-wsl2.html)
+
+MathWorks 지원 패키지는 Simulink 생성 코드를 `px4_simulink_app` 모듈로 넣고, 선택한 보드의 빌드 구성과 부팅 절차에 연결합니다. 여기에 HyRUS 센서 외부 모듈과 MAVLink 확장을 함께 포함해 **하나의 펌웨어**로 빌드하는 것이 통합 목표입니다. [MathWorks의 PX4 통합 구조](https://www.mathworks.com/help/uav/px4/ug/px4-capabilities-integration.html)
+
+~~~mermaid
+flowchart TD
+    RELEASE[MATLAB 릴리스가 지원하는 PX4 버전] --> SOURCE[Simulink 전용 PX4 작업본]
+    MODEL[Simulink 모델] --> GENERATED[생성 코드와 px4_simulink_app 등록]
+    GENERATED --> SOURCE
+    ADDON[해당 버전에 이식·검증한 MAVLink 확장] --> SOURCE
+    SOURCE --> BUILD[같은 보드 구성으로 전체 빌드]
+    SENSOR[HyRUS 센서 외부 모듈] --> BUILD
+    BUILD --> IMAGE[Simulink 제어 + 센서 + MAVLink가 포함된 .px4]
+    IMAGE --> START[부팅 시 필요한 모듈·통신 시작 확인]
+~~~
+
+연결 순서는 다음과 같습니다.
+
+1. MathWorks Hardware Setup에서 해당 릴리스의 PX4 작업본·도구 모음·보드 구성을 준비합니다. 모델 원본과 사용자 변경을 Git으로 보존합니다.
+2. 그 PX4 버전에 MAVLink addon을 이식하고 API·메시지 정의 차이를 확인합니다. 현재 addon 태그가 모든 MathWorks 지원 버전에 그대로 적용된다고 가정하지 않습니다.
+3. Simulink가 생성 모듈을 등록한 **같은 PX4 작업본과 보드 구성**에 HyRUS 외부 모듈을 연결합니다. `build.sh --px4-dir ... --target ...`는 이미 준비된 소스를 빌드할 수 있지만, Simulink 코드 생성이나 지원 패키지의 빌드 훅 설정은 수행하지 않습니다.
+4. 최종 펌웨어에 `px4_simulink_app`, `shtc3`, MAVLink 확장이 함께 들어갔는지 확인합니다. 현재 `validate.py`는 고정된 main 기반 조합의 센서·MAVLink를 검사하며, Simulink 모듈 포함 여부는 검사하지 않습니다. Simulink 작업본에는 커밋을 바꾸는 `firmware.py prepare`와 이를 내부에서 실행하는 `validate.py`를 실행하지 않습니다.
+5. 선택한 부팅 절차에 센서 시작과 MAVLink 송신을 연결합니다. 기본 `extras.txt` 훅이 사용자 `rc.txt`에서도 실행되는지는 별도로 확인합니다.
+
+MathWorks의 사용자 부팅 스크립트는 USB를 사용하는 External Mode를 위해 MAVLink를 비활성화할 수 있습니다. 이 모드에서는 Router로 전송할 MAVLink 실행과 포트 배치를 따로 정해야 합니다. 우리 부팅 예제로 Simulink 부팅 스크립트를 덮어쓰지 않습니다. [사용자 부팅 스크립트의 동작](https://www.mathworks.com/help/uav/px4/ug/custom-startup-script.html)
+
+현재 빌드 스크립트는 `EXTERNAL_MODULES_LOCATION` 하나를 HyRUS에 지정합니다. 다른 사용자 모듈이 이미 그 설정을 사용한다면 두 외부 모듈 묶음을 함께 등록하는 통합 구성이 추가로 필요합니다. Simulink가 공식 문서처럼 PX4 트리 내부에 생성 모듈을 넣는 경우에도, 해당 릴리스의 실제 생성·재빌드 과정에서 설정이 유지되는지 확인해야 합니다.
+
+**현재 검증 범위에는 실제 Simulink 모델의 코드 생성·통합 빌드·부팅 시험이 포함되지 않습니다.** 공식 main 호환성 검사는 계속 유지하며, Simulink 호환성은 MATLAB 릴리스·지원 패키지·PX4 커밋·보드·모델의 조합으로 별도 검증합니다.
+
 ## 고정된 조합 검증과 자동 업데이트 검사
 
 제공된 조합을 재현하고 검증 보고서를 만들 때는 외부 모듈 저장소 루트에서 실행합니다.
