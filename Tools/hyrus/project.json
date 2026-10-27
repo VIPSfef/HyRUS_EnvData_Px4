@@ -1,7 +1,9 @@
 {
   "upstream_url": "https://github.com/PX4/PX4-Autopilot.git",
   "upstream_branch": "main",
-  "baseline_commit": "6ea3539157ca358c70a515878b77077af7d4611d",
-  "px4_commit": "6ea3539157ca358c70a515878b77077af7d4611d",
+  "upstream_commit": "a743c7b7369873b6530bcd51019477a5fe9659ab",
+  "fork_url": "https://github.com/VIPSfef/Firmware.git",
+  "fork_branch": "hyrus/mavlink",
+  "px4_commit": "263e2acb789cb5955c4a6bcb19181c6a7b19cf59",
   "firmware_target": "px4_fmu-v6c_default"
 }

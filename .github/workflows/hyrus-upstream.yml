@@ -18,14 +18,9 @@ concurrency:
 
 jobs:
   candidate:
-    name: Pin candidate and compatibility checks
+    name: Merge official main into the pinned fork and validate
     runs-on: ubuntu-24.04
     timeout-minutes: 50
-    outputs:
-      changed: ${{ steps.prepare.outputs.changed }}
-      base: ${{ steps.prepare.outputs.base }}
-      upstream: ${{ steps.prepare.outputs.upstream }}
-      candidate: ${{ steps.prepare.outputs.candidate }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -35,26 +30,26 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
-      - name: Prepare the official main pin on a detached candidate
+      - name: Prepare a detached fork merge and module manifest candidate
         id: prepare
-        run: python3 Tools/hyrus/upstream.py prepare --output build/hyrus-upstream
-      - name: Prepare official PX4 and apply the MAVLink integration
-        if: steps.prepare.outputs.changed == 'true'
         run: |
           mkdir -p build/hyrus-upstream
-          python3 Tools/hyrus/firmware.py prepare 2>&1 | tee build/hyrus-upstream/prepare.log
+          python3 Tools/hyrus/upstream.py prepare --output build/hyrus-upstream 2>&1 | tee build/hyrus-upstream/merge.log
+      - name: Prepare the candidate fork and its pinned submodules
+        if: steps.prepare.outputs.changed == 'true'
+        run: python3 Tools/hyrus/firmware.py prepare 2>&1 | tee build/hyrus-upstream/prepare.log
       - name: Install candidate PX4 build dependencies
         if: steps.prepare.outputs.changed == 'true'
         env:
           PIP_CONSTRAINT: ${{ github.workspace }}/Tools/hyrus/python-constraints.txt
         run: bash build/px4/Tools/setup/ubuntu.sh --no-sim-tools
-      - name: Test and build the exact candidate
+      - name: Test and build the exact fork and module candidate
         if: steps.prepare.outputs.changed == 'true'
         run: python3 Tools/hyrus/validate.py --output build/hyrus-upstream --jobs 2
-      - name: Package the tested Git candidate
+      - name: Package the two tested Git candidates for review
         if: steps.prepare.outputs.changed == 'true'
         run: python3 Tools/hyrus/upstream.py package --output build/hyrus-upstream
-      - name: Keep merge report, validation logs and candidate
+      - name: Keep merge report, validation logs, firmware and Git bundles
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -62,42 +57,3 @@ jobs:
           path: build/hyrus-upstream/
           if-no-files-found: warn
           retention-days: 14
-
-  propose:
-    name: Propose the tested candidate
-    needs: candidate
-    if: needs.candidate.outputs.changed == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: write
-      pull-requests: write
-      actions: write
-    steps:
-      # This job executes only helper code from the original trusted base.
-      # Candidate source/build scripts never receive its write token.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.candidate.outputs.base }}
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: '3.12'
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        with:
-          name: hyrus-upstream-${{ github.run_id }}-${{ github.run_attempt }}
-          path: candidate-artifact
-      - name: Create a branch and PR, then dispatch its CI
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HYRUS_REPOSITORY: ${{ github.repository }}
-          HYRUS_BASE_BRANCH: ${{ github.event.repository.default_branch }}
-          HYRUS_BASE: ${{ needs.candidate.outputs.base }}
-          HYRUS_CANDIDATE: ${{ needs.candidate.outputs.candidate }}
-          HYRUS_UPSTREAM: ${{ needs.candidate.outputs.upstream }}
-        run: |
-          python3 Tools/hyrus/publish_candidate.py \
-            --artifact candidate-artifact \
-            --repository "$HYRUS_REPOSITORY" --base-branch "$HYRUS_BASE_BRANCH" \
-            --base "$HYRUS_BASE" --candidate "$HYRUS_CANDIDATE" --upstream "$HYRUS_UPSTREAM"

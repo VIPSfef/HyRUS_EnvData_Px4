@@ -7,16 +7,18 @@ set(config_module_list_external
 )
 
 # The sensor module is external; connecting its stream to PX4's existing
-# MAVLink task still requires the small, reviewed MAVLink integration patch.
+# MAVLink task uses integration already committed in the pinned firmware fork.
 file(READ "${PX4_SOURCE_DIR}/src/modules/mavlink/CMakeLists.txt" _hyrus_mavlink_cmake)
-string(FIND "${_hyrus_mavlink_cmake}" "mavlink/dialect.cmake" _hyrus_mavlink_hook)
+string(FIND "${_hyrus_mavlink_cmake}" "hyrus/dialect.cmake" _hyrus_mavlink_hook)
 if(_hyrus_mavlink_hook LESS 0)
     message(FATAL_ERROR
-        "HyRUS MAVLink integration is missing. Apply the matching patch from the HyRUS repository before building.")
+        "HyRUS MAVLink integration is missing. Use the firmware fork commit recorded in Tools/hyrus/project.json.")
 endif()
-if(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/../mavlink/dialect.cmake")
-    message(FATAL_ERROR "HyRUS external MAVLink dialect.cmake is missing from this checkout.")
-endif()
+foreach(_hyrus_file hyrus/dialect.cmake hyrus/weather.xml streams/SENS_ATMOS.hpp)
+    if(NOT EXISTS "${PX4_SOURCE_DIR}/src/modules/mavlink/${_hyrus_file}")
+        message(FATAL_ERROR "HyRUS firmware fork is missing ${_hyrus_file}.")
+    endif()
+endforeach()
 
 # Keep other consumers (for example simulator_mavlink) on the same dialect.
 # This is a normal configure variable; it does not edit PX4's board files.

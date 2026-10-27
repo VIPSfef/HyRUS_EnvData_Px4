@@ -1,4 +1,4 @@
-"""Validate external sensor modules against their exact official PX4 revision."""
+"""Validate external sensor modules against their pinned MAVLink firmware fork."""
 from __future__ import annotations
 import argparse
 import hashlib
@@ -7,13 +7,14 @@ import shutil
 import subprocess
 import sys
 from ci_common import check_device_type, check_history, check_workflows, fail, git_text, json_write, logged, read_policy
-from firmware import make_command, prepare, verify_patch
+from firmware import make_command, prepare, verify_fork
 
 def validate(root: Path, px4: Path, output: Path, jobs: int) -> dict:
     policy = read_policy(root)
     target = policy["firmware_target"]
-    report = {"format": "hyrus-compatibility/v2", "source_commit": git_text(root, "rev-parse", "HEAD"),
+    report = {"format": "hyrus-compatibility/v3", "source_commit": git_text(root, "rev-parse", "HEAD"),
               "px4_commit": policy["px4_commit"], "firmware_target": target,
+              "upstream_commit": policy["upstream_commit"], "fork_url": policy["fork_url"],
               "passed": False, "completed_checks": [],
               "coverage": "external-module host tests, actual generated MAVLink wire, ARM compile/link; no hardware or flight test"}
     output.mkdir(parents=True, exist_ok=True)
@@ -22,7 +23,8 @@ def validate(root: Path, px4: Path, output: Path, jobs: int) -> dict:
         if git_text(root, "status", "--porcelain"):
             raise ValueError("Validation requires a clean committed external-module checkout")
         prepare(root, px4)
-        report["completed_checks"].append("external_source_and_mavlink_patch")
+        report["integration_paths"] = verify_fork(root, px4, policy)
+        report["completed_checks"].append("external_source_and_committed_fork")
         report["device_type"] = check_device_type(root, px4)
         report["completed_checks"].append("device_type_collision")
         report["versions"] = check_history(px4)
@@ -35,7 +37,8 @@ def validate(root: Path, px4: Path, output: Path, jobs: int) -> dict:
         commands = [
             ("workflow_helpers", root, [sys.executable, "-m", "unittest", "discover", "-s", "Tools/hyrus/tests", "-v"]),
             ("native_configure", root, ["cmake", "-S", "test/hyrus", "-B", str(native), "-G", "Ninja",
-                                       "-DCMAKE_BUILD_TYPE=Release", "-DHYRUS_MAVLINK_HEADERS="]),
+                                       "-DCMAKE_BUILD_TYPE=Release", "-DHYRUS_PX4_SOURCE=" + str(px4),
+                                       "-DHYRUS_MAVLINK_HEADERS="]),
             ("native_build", root, ["cmake", "--build", str(native), "--parallel", str(jobs)]),
             ("native_tests", root, ["ctest", "--test-dir", str(native), "--output-on-failure"]),
             ("arm_firmware", px4, make_command(root, policy, jobs)),
@@ -58,13 +61,14 @@ def validate(root: Path, px4: Path, output: Path, jobs: int) -> dict:
         if "SENS_EN_SHTC3" not in parameters:
             raise ValueError("External SHTC3 parameter metadata is missing from the firmware")
         report["completed_checks"].append("linked_external_commands_and_parameters")
-        verify_patch(root, px4, policy["px4_commit"])
+        verify_fork(root, px4, policy)
         if git_text(root, "status", "--porcelain"):
             raise ValueError("External module source changed during validation")
         image = firmware_build / (target + ".px4")
         if not image.is_file() or image.stat().st_size == 0:
             raise ValueError("Firmware build did not produce the expected .px4 image")
-        report["patch_sha256"] = hashlib.sha256((root / "patches/px4-mavlink.patch").read_bytes()).hexdigest()
+        integration = git_text(px4, "diff", "--binary", policy["upstream_commit"], policy["px4_commit"])
+        report["integration_sha256"] = hashlib.sha256(integration.encode("utf-8")).hexdigest()
         report["firmware"] = {"file": image.name, "bytes": image.stat().st_size,
                               "sha256": hashlib.sha256(image.read_bytes()).hexdigest()}
         shutil.copyfile(image, output / image.name)

@@ -25,9 +25,13 @@ set(SHTC3_INCLUDE "${HYRUS_ROOT}/src/drivers/hygrometer/shtc3")
 hyrus_core_test(shtc3 shtc3_core "${SHTC3_INCLUDE}")
 hyrus_core_test(shtc3_probe shtc3_probe
   "${HYRUS_ROOT}/src/systemcmds/shtc3_probe" "${SHTC3_INCLUDE}")
+set(HYRUS_PX4_SOURCE "${HYRUS_ROOT}/build/px4" CACHE PATH "Prepared firmware fork source")
+if(NOT EXISTS "${HYRUS_PX4_SOURCE}/src/modules/mavlink/streams/SENS_ATMOS.hpp")
+  message(FATAL_ERROR "Prepare the firmware fork first, or set HYRUS_PX4_SOURCE to its checkout")
+endif()
 hyrus_core_test(sens_atmos sens_atmos_stream
   "${CMAKE_CURRENT_SOURCE_DIR}/sens_atmos/stubs"
-  "${HYRUS_ROOT}/mavlink/streams")
+  "${HYRUS_PX4_SOURCE}/src/modules/mavlink/streams")
 
 # Full firmware validation supplies its generated dialect, so these checks use
 # the actual upstream generator output instead of the stream test's stubs.

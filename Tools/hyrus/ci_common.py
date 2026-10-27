@@ -8,10 +8,13 @@ import subprocess
 import sys
 
 UPSTREAM_URL = "https://github.com/PX4/PX4-Autopilot.git"
+FORK_URL = "https://github.com/VIPSfef/Firmware.git"
+FORK_BRANCH = "hyrus/mavlink"
 POLICY_PATH = "Tools/hyrus/project.json"
 ACTIVE_WORKFLOWS = frozenset({"hyrus-ci.yml", "hyrus-upstream.yml"})
-PATCH_PATHS = frozenset("src/modules/mavlink/" + name for name in (
-    "CMakeLists.txt", "mavlink_messages.cpp", "mavlink_main.cpp", "streams/HYGROMETER_SENSOR.hpp"))
+INTEGRATION_PATHS = frozenset("src/modules/mavlink/" + name for name in (
+    "CMakeLists.txt", "mavlink_messages.cpp", "mavlink_main.cpp", "streams/HYGROMETER_SENSOR.hpp",
+    "streams/SENS_ATMOS.hpp", "hyrus/dialect.cmake", "hyrus/weather.xml"))
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 
 def git(root: Path, *arguments: str, check: bool = True, env: dict | None = None) -> subprocess.CompletedProcess:
@@ -25,12 +28,22 @@ def read_policy(root: Path) -> dict:
     policy = json.loads((root / POLICY_PATH).read_text(encoding="utf-8"))
     if policy.get("upstream_url") != UPSTREAM_URL or policy.get("upstream_branch") != "main":
         raise ValueError("Only official PX4 main is supported")
-    for key in ("baseline_commit", "px4_commit"):
+    if policy.get("fork_url") != FORK_URL or policy.get("fork_branch") != FORK_BRANCH:
+        raise ValueError("Only the HyRUS MAVLink firmware fork is supported")
+    for key in ("upstream_commit", "px4_commit"):
         if not SHA.fullmatch(policy.get(key, "")):
             raise ValueError(key + " must be a full commit SHA")
     if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]*", policy.get("firmware_target", "")):
         raise ValueError("Invalid firmware target")
     return policy
+
+
+def require_clean_checkout(root: Path, label: str, *, ignore_submodules: bool = False) -> None:
+    arguments = ["status", "--porcelain"]
+    if ignore_submodules:
+        arguments.append("--ignore-submodules=all")
+    if git_text(root, *arguments):
+        raise ValueError(label + " requires a clean committed checkout; existing work is preserved")
 
 def check_workflows(root: Path) -> None:
     active = {p.name for p in (root / ".github/workflows").iterdir() if p.is_file()}

@@ -1,90 +1,84 @@
-# External-module build and PX4 main compatibility
+# 외부 모듈·PX4 포크 빌드와 main 호환성 검사
 
-HyRUS stores only the sensor/probe modules, MAVLink integration, tests, and
-build policy. Official PX4 is a separate checkout, normally ignored under
-build/px4. Its complete commit is fixed in Tools/hyrus/project.json
-(px4_commit). baseline_commit records the original baseline.
+외부 모듈 저장소는 센서·진단 모듈, 테스트, 버전 지정과 빌드 도구를 관리합니다. MAVLink 연결은 `VIPSfef/Firmware`의 `hyrus/mavlink` 브랜치에 커밋합니다. PX4 포크 작업본은 별도 디렉터리에 두며, 기본 경로 `build/px4/`는 외부 모듈의 Git에서 제외됩니다.
 
-## Build flow
+## 버전 지정
 
-1. Validate the external module files and the four-path MAVLink patch allowlist.
-2. Clone official PX4 with full history and original tags, or reuse an explicitly
-   supplied dedicated checkout. Check out px4_commit and its recorded submodules.
-3. Apply patches/px4-mavlink.patch. Sensor files remain outside PX4.
-4. Build with EXTERNAL_MODULES_LOCATION pointing to this repository.
-5. Run native protocol/stream tests, generated-message wire tests, ARM linking,
-   command/parameter presence checks, and the local Git workflow regressions.
-6. Record both source commits, submodule pins, patch SHA256 and firmware SHA256.
+`Tools/hyrus/project.json`은 다음 값을 관리합니다.
 
-The allowed PX4 changes are:
-- src/modules/mavlink/CMakeLists.txt
-- src/modules/mavlink/mavlink_messages.cpp
-- src/modules/mavlink/mavlink_main.cpp
-- src/modules/mavlink/streams/HYGROMETER_SENSOR.hpp
+| 키 | 의미 |
+| --- | --- |
+| `upstream_url`, `upstream_branch` | 공식 PX4 저장소와 추적할 `main` |
+| `upstream_commit` | 현재 포크 변경을 비교하는 공식 기준 SHA |
+| `fork_url`, `fork_branch` | MAVLink 변경을 관리하는 포크와 브랜치 |
+| `px4_commit` | 실제 빌드할 포크의 전체 SHA |
+| `firmware_target` | 대상 보드의 빌드 타깃 |
 
-The official external-module API compiles the drivers. The small MAVLink CMake
-hook is our maintained integration, not an upstream external-stream API.
-Board config, sensor device registry, normal startup and flight-control files
-are not patched. Driver startup uses the supplied SD-card extras.txt addon.
+`prepare`는 포크 브랜치의 최신 끝이 아니라 `px4_commit`을 체크아웃합니다. 공식 기준이 포크의 조상이고 두 커밋 사이의 변경이 허용한 MAVLink 경로에만 있는지 검사합니다. `git apply`로 적용할 별도 패치는 없습니다.
 
-## Local commands
+## 빌드 순서
 
-Use Ubuntu/WSL, with the checkouts on the Linux filesystem. A clean committed
-external-module tree is required for a validation report.
+1. 외부 모듈 파일과 버전 지정 형식을 검사합니다.
+2. 포크를 전체 이력으로 복제하거나, 지정한 깨끗한 전용 작업본을 사용합니다.
+3. 지정한 포크 커밋과 그 커밋에 기록된 하위 모듈을 준비합니다.
+4. 공식 기준과의 관계·변경 범위, 센서 장치 ID 충돌, PX4/NuttX 이력을 검사합니다.
+5. Git 동작 회귀 테스트와 native 센서·진단·포크 스트림 테스트를 실행합니다.
+6. `EXTERNAL_MODULES_LOCATION`을 외부 모듈 저장소로 지정해 ARM 펌웨어 전체를 빌드합니다.
+7. 실제 생성 MAVLink 헤더로 패킷을 검사하고, 최종 ELF의 센서 명령과 파라미터 포함 여부를 확인합니다.
+8. 소스 커밋·하위 모듈·통합 변경·펌웨어 식별 정보를 기록하고 결과를 모읍니다.
 
-~~~sh
-python3 Tools/hyrus/firmware.py prepare
-PIP_CONSTRAINT="$PWD/Tools/hyrus/python-constraints.txt" bash build/px4/Tools/setup/ubuntu.sh --no-sim-tools
-python3 Tools/hyrus/validate.py --jobs 4
-~~~
+센서 드라이버는 공식 외부 모듈 API로 빌드합니다. MAVLink 연결은 포크가 관리하는 변경입니다. 보드 설정, 센서 장치 등록부, 정상 부팅 및 비행 제어 파일은 HyRUS를 위해 변경하지 않습니다. 센서 자동 시작은 SD 카드 `extras.txt` 예제를 사용합니다.
 
-The official setup script installs development dependencies using sudo.
-The shared pip constraint preserves the legacy pkg_resources API required by
-the pinned DroneCAN generator. Setuptools 82 removed that API; this host-only
-constraint keeps the PX4 source patch limited to the four MAVLink files.
-An existing dedicated PX4 checkout can be selected with --px4-dir /path/to/PX4
-on both Python commands. It must be clean or contain exactly the reviewed
-MAVLink patch; arbitrary edits and untracked PX4 source are rejected and retained.
-Never use shallow submodule clones. Version text does not substitute for exact
-source identity; reports record the actual PX4 and NuttX commits.
+## 로컬 실행
 
-The firmware and logs are copied into build/hyrus-ci. Test/build failures return
-a nonzero status and leave a failed validation.json when validation has begun.
-Neither script flashes hardware or modifies the existing GitHub Firmware fork.
+Ubuntu 또는 WSL Ubuntu의 Linux 파일시스템에서 실행합니다. 시작 위치는 외부 모듈 저장소 루트입니다. 검증 보고서는 커밋된 깨끗한 외부 모듈 작업본을 요구합니다.
 
-## Updates
+```sh
+HYRUS_PX4_DIR="$HOME/src/PX4-HyRUS-Fork"
+python3 Tools/hyrus/firmware.py prepare --px4-dir "$HYRUS_PX4_DIR"
+PIP_CONSTRAINT="$PWD/Tools/hyrus/python-constraints.txt" \
+  bash "$HYRUS_PX4_DIR/Tools/setup/ubuntu.sh" --no-sim-tools
+python3 Tools/hyrus/validate.py --px4-dir "$HYRUS_PX4_DIR" --jobs 6
+```
 
-hyrus-ci.yml runs on main pushes, pull requests, and manual dispatch.
-hyrus-upstream.yml checks official main daily at 03:17 UTC (12:17 Korea time)
-and by manual dispatch. It creates a detached candidate changing only px4_commit
-in project.json. It then applies the same patch and runs the same validation
-against that official revision. If source compatibility fails, the pin in main
-stays unchanged. No PX4 release-branch history is merged into this module repo.
+공식 setup 스크립트는 `sudo`로 개발 의존성을 설치합니다. Python 제약 파일은 코드 생성 도구의 호환성을 유지하기 위한 호스트 환경 설정입니다. 두 Python 명령의 `--px4-dir`을 생략하면 `build/px4/`를 사용합니다.
 
-A passing candidate is packed as a Git bundle. A separate publication job uses
-only helper code from the original trusted base, verifies that the candidate
-changes only px4_commit, and creates a separate branch and PR. Candidate PX4
-build scripts never receive that job's write token. The publisher rejects a
-stale base or altered artifact/ref and explicitly dispatches the ordinary CI
-workflow for its PR, because GITHUB_TOKEN-created PRs do not trigger it.
+기존 패치 방식 작업본의 수정 사항을 이 도구가 지우거나 포크 커밋으로 바꾸지 않습니다. 그런 작업본이 있다면 보존하고 새 전용 경로를 사용하세요. 하위 모듈도 기록된 커밋과 전체 이력을 사용합니다. 버전 문자열만으로 소스 조합을 판정하지 않습니다.
 
-Enable Actions and allow Actions to create pull requests in repository settings.
-The workflows use repository-scoped GITHUB_TOKEN, not a personal access token.
-There is no automatic merge or upload to a device. Build success covers
-compilation and the declared regressions, not actual I2C behavior, SITL, flight,
-or all upstream behavioral changes.
+펌웨어 원본은 PX4 작업본의 `build/px4_fmu-v6c_default/px4_fmu-v6c_default.px4`에 생깁니다. 검증 결과는 외부 모듈 저장소의 `build/hyrus-ci/`에 복사됩니다. 검증이 시작된 뒤 실패하면 비정상 종료와 실패한 `validation.json`을 남깁니다. 준비·검증 스크립트는 원격 브랜치나 기체를 변경하지 않습니다.
 
-To inspect a candidate locally, use a disposable clean clone:
+## 공식 main 업데이트 검사
 
-~~~sh
-python3 Tools/hyrus/upstream.py prepare --output build/hyrus-upstream
-# Continue only if candidate.json says changed=true and state=prepared.
-python3 Tools/hyrus/firmware.py prepare
-PIP_CONSTRAINT="$PWD/Tools/hyrus/python-constraints.txt" bash build/px4/Tools/setup/ubuntu.sh --no-sim-tools
-python3 Tools/hyrus/validate.py --output build/hyrus-upstream --jobs 4
-python3 Tools/hyrus/upstream.py package --output build/hyrus-upstream
-~~~
+`hyrus-ci.yml`은 외부 모듈 `main` 푸시, PR, 수동 실행에서 고정된 조합을 검사합니다. `hyrus-upstream.yml`은 매일 **03:17 UTC / 12:17 한국 시간**과 수동 실행으로 공식 main을 확인합니다.
 
-Artifacts retain reports, preparation/build/test logs, firmware, and successful
-candidate bundles for 14 days. Rechecking the same module base and PX4 pin
-produces the same candidate commit.
+업데이트 검사는 다음 순서입니다.
+
+1. 현재 외부 모듈 커밋과 포크 커밋을 기준으로 전용 작업본을 준비합니다.
+2. 최신 공식 main을 가져와 임시 포크 작업본에 Git으로 병합합니다.
+3. 병합 충돌이나 허용 범위 밖 변경이 있으면 실패 결과를 보관하고 중단합니다.
+4. 포크 후보를 만들고, 외부 모듈의 분리된 후보에서 `upstream_commit`과 `px4_commit`만 갱신합니다.
+5. 같은 준비·native 테스트·ARM 빌드·실제 MAVLink 검사를 실행합니다.
+6. 정확히 검사한 포크 후보와 외부 모듈 후보를 각각 Git bundle로 보관합니다.
+
+원격 브랜치와 기본 브랜치의 manifest는 이 과정에서 갱신하지 않습니다. 후보를 검토한 뒤 포크 커밋을 먼저 게시하고 외부 모듈의 manifest 변경을 반영해야 합니다. 포크의 새 커밋이 원격에 없으면 일반 빌드가 해당 커밋을 가져올 수 없습니다.
+
+워크플로는 `contents: read`로 두 공개 저장소를 읽고 결과 artifact를 보관합니다. 다른 저장소를 수정하는 토큰이나 Actions의 PR 승인 권한을 요구하지 않습니다. 자동 PR 생성·원격 병합·기체 업로드를 수행하는 단계는 없습니다.
+
+후보를 로컬에서 확인하려면 **일회용 깨끗한 외부 모듈 복제본**에서 실행합니다.
+
+```sh
+HYRUS_PX4_DIR="$HOME/src/PX4-HyRUS-Candidate"
+python3 Tools/hyrus/upstream.py prepare \
+  --px4-dir "$HYRUS_PX4_DIR" --output build/hyrus-upstream
+# candidate.json의 changed=true, state=prepared일 때 이어서 실행합니다.
+PIP_CONSTRAINT="$PWD/Tools/hyrus/python-constraints.txt" \
+  bash "$HYRUS_PX4_DIR/Tools/setup/ubuntu.sh" --no-sim-tools
+python3 Tools/hyrus/validate.py \
+  --px4-dir "$HYRUS_PX4_DIR" --output build/hyrus-upstream --jobs 6
+python3 Tools/hyrus/upstream.py package \
+  --px4-dir "$HYRUS_PX4_DIR" --output build/hyrus-upstream
+```
+
+검사 결과의 `candidate.json`에는 외부 모듈 기준 `base`, 포크 기준 `fork_base`, 새 공식 기준 `upstream`, 포크 후보 `fork_candidate`, 외부 모듈 후보 `candidate`를 기록합니다. `candidate.bundle`은 외부 모듈 manifest 변경, `firmware-candidate.bundle`은 포크 병합 후보를 담습니다.
+
+공식 main이 이미 반영되어 있다면 후보를 새로 만들지 않습니다. 준비·검증 로그, 후보 보고서, 펌웨어, 통과한 Git bundle은 GitHub artifact에 14일 동안 보관합니다. Git 병합과 빌드 성공은 실제 I2C 동작·SITL·비행 시험 또는 모든 upstream 동작 변화의 검증을 뜻하지 않습니다.
