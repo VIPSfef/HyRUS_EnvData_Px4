@@ -6,8 +6,19 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-from ci_common import check_device_type, check_history, check_workflows, fail, git_text, json_write, logged, read_policy
+from ci_common import check_device_type, check_history, check_workflows, fail, git_text, json_write, logged, read_policy, require_clean_checkout
 from firmware import make_command, prepare, verify_fork
+
+
+def verify_source_snapshot(root: Path, px4: Path, source_commit: str, submodules: list[str]) -> None:
+    if git_text(root, "rev-parse", "HEAD") != source_commit:
+        raise ValueError("External module commit changed during validation")
+    require_clean_checkout(root, "External module validation")
+    current = git_text(px4, "submodule", "status", "--recursive").splitlines()
+    # Tag descriptions are informational; status, commit and path identify pins.
+    if [line.split(" (", 1)[0] for line in current] != [line.split(" (", 1)[0] for line in submodules]:
+        raise ValueError("PX4 submodule commits changed during validation")
+
 
 def validate(root: Path, px4: Path, output: Path, jobs: int) -> dict:
     policy = read_policy(root)
@@ -62,8 +73,7 @@ def validate(root: Path, px4: Path, output: Path, jobs: int) -> dict:
             raise ValueError("External SHTC3 parameter metadata is missing from the firmware")
         report["completed_checks"].append("linked_external_commands_and_parameters")
         verify_fork(root, px4, policy)
-        if git_text(root, "status", "--porcelain"):
-            raise ValueError("External module source changed during validation")
+        verify_source_snapshot(root, px4, report["source_commit"], report["submodules"])
         image = firmware_build / (target + ".px4")
         if not image.is_file() or image.stat().st_size == 0:
             raise ValueError("Firmware build did not produce the expected .px4 image")

@@ -13,6 +13,7 @@ import ci_common
 from ci_common import POLICY_PATH, check_device_type, git, git_text, json_write
 from firmware import MODULE_FILES, make_command, prepare as firmware_prepare, require_clean_firmware, verify_fork
 from upstream import check_pin_candidate, package, prepare
+from validate import verify_source_snapshot
 
 
 class ExternalFirmwareTests(unittest.TestCase):
@@ -145,6 +146,49 @@ class ExternalFirmwareTests(unittest.TestCase):
         dependency, first = self.add_submodule()
         git(dependency, "checkout", "--detach", first)
         require_clean_firmware(self.px4)
+
+    def test_snapshot_rejects_a_clean_external_commit_change(self):
+        snapshot = git_text(self.px4, "submodule", "status", "--recursive").splitlines()
+        verify_source_snapshot(self.root, self.px4, self.external_base, snapshot)
+        self.write(self.root, "src/CMakeLists.txt", "// newly committed source\n")
+        self.commit(self.root, "Source changed while validation was running")
+        self.assertEqual(git_text(self.root, "status", "--porcelain"), "")
+        with self.assertRaisesRegex(ValueError, "External module commit changed"):
+            verify_source_snapshot(self.root, self.px4, self.external_base, snapshot)
+
+    def test_snapshot_rejects_a_clean_submodule_revision_change(self):
+        dependency, first = self.add_submodule()
+        snapshot = git_text(self.px4, "submodule", "status", "--recursive").splitlines()
+        verify_source_snapshot(self.root, self.px4, self.external_base, snapshot)
+        git(dependency, "checkout", "--detach", first)
+        self.assertEqual(git_text(dependency, "status", "--porcelain"), "")
+        require_clean_firmware(self.px4)
+        with self.assertRaisesRegex(ValueError, "submodule commits changed"):
+            verify_source_snapshot(self.root, self.px4, self.external_base, snapshot)
+
+    def test_snapshot_ignores_informational_submodule_tag_changes(self):
+        dependency, _ = self.add_submodule()
+        snapshot = git_text(self.px4, "submodule", "status", "--recursive").splitlines()
+        git(dependency, "tag", "v1.0.0")
+        current = git_text(self.px4, "submodule", "status", "--recursive").splitlines()
+        self.assertNotEqual(snapshot, current)
+        verify_source_snapshot(self.root, self.px4, self.external_base, snapshot)
+
+    def test_custom_fork_commit_cannot_be_declared_as_official_base(self):
+        self.write(self.px4, "src/modules/mavlink/mavlink_messages.cpp", "// more integration\n")
+        self.commit(self.px4, "Additional integration")
+        fork_head = git_text(self.px4, "rev-parse", "HEAD")
+        spoofed = dict(self.policy, upstream_commit=self.fork_pin, px4_commit=fork_head)
+        # An ancestry/diff-only check accepts this pair; provenance must also
+        # prove that the claimed upstream is actually in official main.
+        verify_fork(self.root, self.px4, spoofed)
+        json_write(self.root / POLICY_PATH, spoofed)
+        self.commit(self.root, "Incorrectly declared upstream")
+        with self.assertRaisesRegex(ValueError, "outside the fetched official main history"):
+            firmware_prepare(self.root, self.px4, update_submodules=False)
+        self.assertEqual(git_text(self.px4, "rev-parse", "HEAD"), fork_head)
+        self.assertEqual(git_text(self.px4, "status", "--porcelain"), "")
+
 
     def test_fork_changes_outside_mavlink_are_refused(self):
         self.write(self.px4, "src/drivers/drv_sensor.h", "// unrelated fork change\n")

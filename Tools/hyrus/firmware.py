@@ -62,6 +62,8 @@ def prepare(root: Path, px4: Path, update_submodules: bool = True) -> dict:
     # official tags, so fetch them without changing the selected firmware pin.
     git(px4, "fetch", "--no-recurse-submodules", "--filter=blob:none", "--tags",
         policy["upstream_url"], "refs/heads/" + policy["upstream_branch"])
+    if git(px4, "merge-base", "--is-ancestor", policy["upstream_commit"], "FETCH_HEAD", check=False).returncode:
+        raise ValueError("The recorded upstream commit is outside the fetched official main history")
     git(px4, "checkout", "--detach", policy["px4_commit"])
     # Source is committed in the fork. Never apply patches or copy drivers here.
     # Check ancestry/delta before downloading dependencies for an invalid pin.
