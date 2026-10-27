@@ -77,6 +77,8 @@ bash Tools/hyrus/build.sh --px4-dir "$HOME/src/PX4-HyRUS-Fork" \
   -- -DHYRUS_MAVLINK=OFF
 ~~~
 
+CMake 옵션은 빌드 폴더에 저장됩니다. 위에서 확장을 껐다면 같은 폴더에서 다시 켤 때 `-- -DHYRUS_MAVLINK=ON`을 명시하세요. 옵션을 생략하면 이전 설정을 유지합니다.
+
 소스를 수정한 뒤에도 같은 빌드 명령으로 증분 빌드할 수 있습니다. 메모리가 부족하면 병렬 작업 수를 낮추세요. 다른 보드는 해당 보드가 센서 연결과 PX4 외부 모듈 API를 지원하는지 별도로 확인해야 합니다.
 
 ## CMake로 직접 빌드
