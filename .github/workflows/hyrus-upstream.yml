@@ -40,8 +40,6 @@ jobs:
         run: python3 Tools/hyrus/firmware.py prepare 2>&1 | tee build/hyrus-upstream/prepare.log
       - name: Install candidate PX4 build dependencies
         if: steps.prepare.outputs.changed == 'true'
-        env:
-          PIP_CONSTRAINT: ${{ github.workspace }}/Tools/hyrus/python-constraints.txt
         run: bash build/px4/Tools/setup/ubuntu.sh --no-sim-tools
       - name: Test and build the exact fork and module candidate
         if: steps.prepare.outputs.changed == 'true'

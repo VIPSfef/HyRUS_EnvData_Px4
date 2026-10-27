@@ -75,15 +75,6 @@ def prepare(root: Path, px4: Path, update_submodules: bool = True) -> dict:
     return policy
 
 
-def make_command(root: Path, policy: dict, jobs: int) -> list[str]:
-    # PX4's Makefile expands CMAKE_ARGS through a shell. Keep spaces quoted.
-    path = str(root.resolve())
-    if any(char in path for char in '"$\\\n\r') or chr(96) in path:
-        raise ValueError("Use a Linux source path without shell expansion characters")
-    return ["make", policy["firmware_target"], "-j" + str(jobs),
-            'EXTERNAL_MODULES_LOCATION="' + path + '"']
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("prepare",))

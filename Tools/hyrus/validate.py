@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import sys
 from ci_common import check_device_type, check_history, check_workflows, fail, git_text, json_write, logged, read_policy, require_clean_checkout
-from firmware import make_command, prepare, verify_fork
+from firmware import prepare, verify_fork
 
 
 def verify_source_snapshot(root: Path, px4: Path, source_commit: str, submodules: list[str]) -> None:
@@ -52,7 +52,9 @@ def validate(root: Path, px4: Path, output: Path, jobs: int) -> dict:
                                        "-DHYRUS_MAVLINK_HEADERS="]),
             ("native_build", root, ["cmake", "--build", str(native), "--parallel", str(jobs)]),
             ("native_tests", root, ["ctest", "--test-dir", str(native), "--output-on-failure"]),
-            ("arm_firmware", px4, make_command(root, policy, jobs)),
+            ("arm_firmware", root, ["bash", str(root / "Tools/hyrus/build.sh"),
+                                    "--px4-dir", str(px4), "--target", target, "--jobs", str(jobs),
+                                    "--", "-DHYRUS_MAVLINK=ON"]),
             ("wire_configure", root, ["cmake", "-S", "test/hyrus", "-B", str(native), "-G", "Ninja",
                                      "-DCMAKE_BUILD_TYPE=Release", "-DHYRUS_MAVLINK_HEADERS=" + str(firmware_build / "mavlink")]),
             ("wire_build", root, ["cmake", "--build", str(native), "--parallel", str(jobs)]),
@@ -68,6 +70,8 @@ def validate(root: Path, px4: Path, output: Path, jobs: int) -> dict:
         names = {line.split()[-1] for line in symbols.splitlines() if line.split()}
         if not {"shtc3_main", "shtc3_probe_main"} <= names:
             raise ValueError("External sensor/probe commands are missing from the linked firmware")
+        if not any("MavlinkStreamSensAtmos" in name for name in names):
+            raise ValueError("The surveyor MAVLink stream is missing from the linked firmware")
         parameters = (firmware_build / "src/lib/parameters/px4_parameters.hpp").read_text(encoding="utf-8")
         if "SENS_EN_SHTC3" not in parameters:
             raise ValueError("External SHTC3 parameter metadata is missing from the firmware")

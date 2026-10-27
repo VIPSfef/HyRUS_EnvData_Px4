@@ -13,8 +13,10 @@ FORK_BRANCH = "hyrus/mavlink"
 POLICY_PATH = "Tools/hyrus/project.json"
 ACTIVE_WORKFLOWS = frozenset({"hyrus-ci.yml", "hyrus-upstream.yml"})
 INTEGRATION_PATHS = frozenset("src/modules/mavlink/" + name for name in (
-    "CMakeLists.txt", "mavlink_messages.cpp", "mavlink_main.cpp", "streams/HYGROMETER_SENSOR.hpp",
-    "streams/SENS_ATMOS.hpp", "hyrus/dialect.cmake", "hyrus/weather.xml"))
+    "CMakeLists.txt", "mavlink_messages.cpp", "mavlink_main.cpp",
+    "streams/SENS_ATMOS.hpp", "hyrus/dialect.cmake", "hyrus/hyrus.xml.in",
+    # A separate standard-unit correction in the tested tracking firmware.
+    "streams/HYGROMETER_SENSOR.hpp"))
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 
 def git(root: Path, *arguments: str, check: bool = True, env: dict | None = None) -> subprocess.CompletedProcess:

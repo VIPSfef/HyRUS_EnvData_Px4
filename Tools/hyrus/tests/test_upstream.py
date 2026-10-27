@@ -1,6 +1,5 @@
 """Real Git regressions for fork preparation, merges and paired review bundles."""
 import json
-import os
 from pathlib import Path
 import subprocess
 import sys
@@ -11,7 +10,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import ci_common
 from ci_common import POLICY_PATH, check_device_type, git, git_text, json_write
-from firmware import MODULE_FILES, make_command, prepare as firmware_prepare, require_clean_firmware, verify_fork
+from firmware import MODULE_FILES, prepare as firmware_prepare, require_clean_firmware, verify_fork
 from upstream import check_pin_candidate, package, prepare
 from validate import verify_source_snapshot
 
@@ -281,16 +280,6 @@ class ExternalFirmwareTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "other than"):
             check_pin_candidate(self.root, self.external_base, git_text(self.root, "rev-parse", "HEAD"),
                                 report["upstream"], report["fork_candidate"])
-
-    @unittest.skipIf(os.name == "nt", "Firmware builds use Linux/WSL")
-    def test_make_passes_external_path_with_spaces_as_one_argument(self):
-        self.write(self.px4, "Makefile",
-                   "CMAKE_ARGS += -DEXTERNAL_MODULES_LOCATION:STRING=$(EXTERNAL_MODULES_LOCATION)\n"
-                   "test_target:\n\t@python3 -c 'import sys,json;print(json.dumps(sys.argv[1:]))' $(CMAKE_ARGS)\n")
-        output = subprocess.check_output(make_command(self.root, {"firmware_target": "test_target"}, 2),
-                                         cwd=self.px4, text=True)
-        self.assertEqual(json.loads(output), ["-DEXTERNAL_MODULES_LOCATION:STRING=" + str(self.root)])
-
 
 if __name__ == "__main__":
     unittest.main()

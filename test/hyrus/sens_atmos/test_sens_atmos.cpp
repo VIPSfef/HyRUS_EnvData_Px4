@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// Compile and execute the production stream header; stub only its platform IO.
+// Compile and execute production stream headers; stub only their platform IO.
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -11,7 +11,7 @@
 
 namespace fake
 {
-Topic topics[2] {};
+Topic topics[TOPIC_COUNT] {};
 unsigned selected_instance = 99;
 unsigned selected_topic = 0;
 unsigned update_calls = 0;
@@ -24,6 +24,8 @@ unsigned sent_channel = 99;
 
 constexpr uint16_t MAVLINK_MSG_ID_SENS_ATMOS = 8009;
 constexpr unsigned MAVLINK_MSG_ID_SENS_ATMOS_LEN = 16;
+constexpr uint16_t MAVLINK_MSG_ID_HYGROMETER_SENSOR = 12920;
+constexpr unsigned MAVLINK_MSG_ID_HYGROMETER_SENSOR_LEN = 5;
 constexpr unsigned MAVLINK_NUM_NON_PAYLOAD_BYTES = 12;
 #define PX4_ISFINITE(value) std::isfinite(value)
 struct mavlink_sens_atmos_t {
@@ -32,12 +34,25 @@ struct mavlink_sens_atmos_t {
 	float Humidity{0.f};
 };
 static mavlink_sens_atmos_t sent_message{};
+struct mavlink_hygrometer_sensor_t {
+	int16_t temperature{0};
+	uint16_t humidity{0};
+	uint8_t id{0};
+};
+static mavlink_hygrometer_sensor_t hygrometer_messages[fake::TOPIC_COUNT]{};
 inline uint8_t mavlink_get_proto_version(uint8_t) { return fake::proto_version; }
 inline void mavlink_msg_sens_atmos_send_struct(uint8_t channel, const mavlink_sens_atmos_t *message)
 {
 	++fake::sent_count;
 	fake::sent_channel = channel;
 	sent_message = *message;
+}
+inline void mavlink_msg_hygrometer_sensor_send_struct(uint8_t channel, const mavlink_hygrometer_sensor_t *message)
+{
+	++fake::sent_count;
+	fake::sent_channel = channel;
+	if (message->id >= fake::TOPIC_COUNT) { std::abort(); }
+	hygrometer_messages[message->id] = *message;
 }
 class Mavlink
 {
@@ -58,6 +73,7 @@ protected:
 	Mavlink *_mavlink;
 };
 #include "SENS_ATMOS.hpp"
+#include "HYGROMETER_SENSOR.hpp"
 
 static unsigned checks = 0;
 #define CHECK(condition) do { ++checks; if (!(condition)) { \
@@ -65,8 +81,8 @@ static unsigned checks = 0;
 
 static void reset()
 {
-	fake::topics[0] = {};
-	fake::topics[1] = {};
+	for (auto &topic : fake::topics) { topic = {}; }
+	for (auto &message : hygrometer_messages) { message = {}; }
 	fake::update_calls = fake::advertised_calls = fake::sent_count = 0;
 	fake::sent_channel = 99;
 	fake::proto_version = 2;
@@ -97,6 +113,39 @@ static void rejected(MavlinkStream &stream, const sensor_hygrometer_s &s)
 	CHECK(!stream.tick());
 	CHECK(fake::update_calls == 1 && !fake::topics[0].unread);
 	CHECK(fake::sent_count == 0);
+}
+static void check_hygrometer_units(Mavlink &mavlink)
+{
+	const unsigned initial_checks = checks;
+	std::unique_ptr<MavlinkStream> stream(MavlinkStreamHygrometerSensor::new_instance(&mavlink));
+	CHECK(stream->get_id() == MAVLINK_MSG_ID_HYGROMETER_SENSOR);
+	CHECK(std::strcmp(stream->get_name(), "HYGROMETER_SENSOR") == 0);
+	reset();
+	CHECK(stream->get_size() == 0 && !stream->tick());
+	CHECK(fake::sent_count == 0);
+
+	// Exercise the actual production float-to-wire conversion, not a packet
+	// encoder given pre-scaled integers. Instance one must retain its own ID.
+	publish(sample(23.5f, 65.25f), 1);
+	CHECK(stream->get_size() == MAVLINK_MSG_ID_HYGROMETER_SENSOR_LEN + MAVLINK_NUM_NON_PAYLOAD_BYTES);
+	CHECK(stream->tick());
+	CHECK(fake::sent_count == 1 && fake::sent_channel == 3);
+	CHECK(hygrometer_messages[1].id == 1);
+	CHECK(hygrometer_messages[1].temperature == 2350);
+	CHECK(hygrometer_messages[1].humidity == 6525);
+	CHECK(!stream->tick() && fake::sent_count == 1);
+
+	reset();
+	publish(sample(-10.25f, 0.f), 0);
+	publish(sample(23.5f, 100.f), 1);
+	CHECK(stream->get_size() == fake::TOPIC_COUNT * (MAVLINK_MSG_ID_HYGROMETER_SENSOR_LEN + MAVLINK_NUM_NON_PAYLOAD_BYTES));
+	CHECK(stream->tick() && fake::sent_count == fake::TOPIC_COUNT);
+	CHECK(hygrometer_messages[0].id == 0 && hygrometer_messages[0].temperature == -1025);
+	CHECK(hygrometer_messages[0].humidity == 0);
+	CHECK(hygrometer_messages[1].id == 1 && hygrometer_messages[1].temperature == 2350);
+	CHECK(hygrometer_messages[1].humidity == 10000);
+	CHECK(!stream->tick() && fake::sent_count == fake::TOPIC_COUNT);
+	std::printf("HYGROMETER_SENSOR_STREAM PASS checks=%u actual_header=1 units=cdegC/c%%\n", checks - initial_checks);
 }
 int main()
 {
@@ -164,5 +213,6 @@ int main()
 		CHECK(sent_message.TempAmbient == -273.15f && sent_message.Humidity == h);
 	}
 	std::printf("SENS_ATMOS_STREAM PASS checks=%u actual_header=1 MAV1_consumption=0 hardware_io=0\n", checks);
+	check_hygrometer_units(mavlink);
 	return 0;
 }

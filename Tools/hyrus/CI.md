@@ -2,6 +2,14 @@
 
 외부 모듈 저장소는 센서·진단 모듈, 테스트, 버전 지정과 빌드 도구를 관리합니다. MAVLink 연결은 `VIPSfef/Firmware`의 `hyrus/mavlink` 브랜치에 커밋합니다. PX4 포크 작업본은 별도 디렉터리에 두며, 기본 경로 `build/px4/`는 외부 모듈의 Git에서 제외됩니다.
 
+## 직접 빌드와 이 문서의 검증 경로
+
+일반 빌드는 README의 두 저장소 준비 절차와 Tools/hyrus/build.sh를 사용합니다. 이 스크립트는 현재 지정한 PX4 작업본에 CMake configure/build를 실행하며 Git 커밋을 바꾸지 않습니다. Python은 PX4 내부 코드 생성의 의존성이지만 우리 Python 준비·검증 도구를 직접 호출할 필요는 없습니다.
+
+이 문서는 공식 main을 추적하는 **고정 조합 검증**을 설명합니다. firmware.py prepare는 manifest의 포크 커밋으로 전용 작업본을 준비하므로 임의의 사용자 커스텀 펌웨어를 유지한 채 검사하는 경로가 아닙니다. 비행 제어 등 다른 변경이 있는 사용자 펌웨어는 addon 이식 후 직접 빌드하고 그 펌웨어의 테스트를 수행합니다.
+
+Portable addon 태그 hyrus-mavlink-addon-v1은 MAVLink 확장 여섯 파일의 순변경을 담습니다. 추적 브랜치는 추가로 표준 HYGROMETER_SENSOR 습도 단위 수정 한 파일을 별도 커밋으로 관리합니다. 고정 조합 검증의 변경 허용 목록은 이 둘을 포함한 일곱 MAVLink 파일입니다. 이 단위 수정은 portable addon에 자동 포함하지 않습니다.
+
 ## 버전 지정
 
 `Tools/hyrus/project.json`은 다음 값을 관리합니다.
@@ -23,25 +31,24 @@
 3. 지정한 포크 커밋과 그 커밋에 기록된 하위 모듈을 준비합니다.
 4. 공식 기준과의 관계·변경 범위, 센서 장치 ID 충돌, PX4/NuttX 이력을 검사합니다.
 5. Git 동작 회귀 테스트와 native 센서·진단·포크 스트림 테스트를 실행합니다.
-6. `EXTERNAL_MODULES_LOCATION`을 외부 모듈 저장소로 지정해 ARM 펌웨어 전체를 빌드합니다.
+6. build.sh의 직접 CMake 경로에 EXTERNAL_MODULES_LOCATION을 전달해 ARM 펌웨어 전체를 빌드합니다.
 7. 실제 생성 MAVLink 헤더로 패킷을 검사하고, 최종 ELF의 센서 명령과 파라미터 포함 여부를 확인합니다.
 8. 소스 커밋·하위 모듈·통합 변경·펌웨어 식별 정보를 기록하고 결과를 모읍니다.
 
 센서 드라이버는 공식 외부 모듈 API로 빌드합니다. MAVLink 연결은 포크가 관리하는 변경입니다. 보드 설정, 센서 장치 등록부, 정상 부팅 및 비행 제어 파일은 HyRUS를 위해 변경하지 않습니다. 센서 자동 시작은 SD 카드 `extras.txt` 예제를 사용합니다.
 
-## 로컬 실행
+## 고정 조합의 로컬 검증
 
 Ubuntu 또는 WSL Ubuntu의 Linux 파일시스템에서 실행합니다. 시작 위치는 외부 모듈 저장소 루트입니다. 검증 보고서는 커밋된 깨끗한 외부 모듈 작업본을 요구합니다.
 
 ```sh
 HYRUS_PX4_DIR="$HOME/src/PX4-HyRUS-Fork"
 python3 Tools/hyrus/firmware.py prepare --px4-dir "$HYRUS_PX4_DIR"
-PIP_CONSTRAINT="$PWD/Tools/hyrus/python-constraints.txt" \
-  bash "$HYRUS_PX4_DIR/Tools/setup/ubuntu.sh" --no-sim-tools
+bash "$HYRUS_PX4_DIR/Tools/setup/ubuntu.sh" --no-sim-tools
 python3 Tools/hyrus/validate.py --px4-dir "$HYRUS_PX4_DIR" --jobs 6
 ```
 
-공식 setup 스크립트는 `sudo`로 개발 의존성을 설치합니다. Python 제약 파일은 코드 생성 도구의 호환성을 유지하기 위한 호스트 환경 설정입니다. 두 Python 명령의 `--px4-dir`을 생략하면 `build/px4/`를 사용합니다.
+공식 setup 스크립트는 `sudo`로 개발 의존성을 설치합니다. 현재 포크의 requirements.txt가 필요한 Python 패키지 버전을 지정합니다. 두 Python 명령의 `--px4-dir`을 생략하면 `build/px4/`를 사용합니다.
 
 기존 패치 방식 작업본의 수정 사항을 이 도구가 지우거나 포크 커밋으로 바꾸지 않습니다. 그런 작업본이 있다면 보존하고 새 전용 경로를 사용하세요. 하위 모듈도 기록된 커밋과 전체 이력을 사용합니다. 버전 문자열만으로 소스 조합을 판정하지 않습니다.
 
@@ -71,8 +78,7 @@ HYRUS_PX4_DIR="$HOME/src/PX4-HyRUS-Candidate"
 python3 Tools/hyrus/upstream.py prepare \
   --px4-dir "$HYRUS_PX4_DIR" --output build/hyrus-upstream
 # candidate.json의 changed=true, state=prepared일 때 이어서 실행합니다.
-PIP_CONSTRAINT="$PWD/Tools/hyrus/python-constraints.txt" \
-  bash "$HYRUS_PX4_DIR/Tools/setup/ubuntu.sh" --no-sim-tools
+bash "$HYRUS_PX4_DIR/Tools/setup/ubuntu.sh" --no-sim-tools
 python3 Tools/hyrus/validate.py \
   --px4-dir "$HYRUS_PX4_DIR" --output build/hyrus-upstream --jobs 6
 python3 Tools/hyrus/upstream.py package \

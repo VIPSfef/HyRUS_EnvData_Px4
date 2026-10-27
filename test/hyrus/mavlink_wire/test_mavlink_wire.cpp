@@ -1,5 +1,5 @@
 // Validate the firmware's generated dialect against the Router input contract.
-#include <weather/mavlink.h>
+#include <hyrus/mavlink.h>
 #include <cstdio>
 #include <cstdlib>
 
