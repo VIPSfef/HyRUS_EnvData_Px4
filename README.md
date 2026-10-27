@@ -1,92 +1,87 @@
 # HyRUS EnvData PX4
 
-커스텀 UAV 서베이어의 SHTC3 I2C 온습도 센서를 읽는 **PX4 외부 모듈**입니다. 센서·진단 코드는 이 저장소에서, MAVLink 송신 확장은 [VIPSfef/Firmware의 hyrus/mavlink](https://github.com/VIPSfef/Firmware/tree/hyrus/mavlink)에서 관리합니다. 결과물은 두 소스를 함께 컴파일한 하나의 PX4 펌웨어입니다.
+**Simulink R2026b / PX4 v1.16.1에서 SHTC3 온습도 센서를 읽고 MAVLink로 보내기 위한 프로젝트**입니다. 센서 코드는 이 저장소의 외부 모듈로 관리하고, MAVLink 연결 코드는 [PX4 포크의 `hyrus/r2026b`](https://github.com/VIPSfef/Firmware/tree/hyrus/r2026b)에 유지합니다.
 
-PC에서 MAVLink를 받아 HTTP·UDP로 서버에 전달하는 기능은 별도 [HyRUS_EnvData_Router](https://github.com/VIPSfef/HyRUS_EnvData_Router)가 담당합니다.
+Simulink 제어 코드는 같은 PX4에 별도 모듈로 들어갑니다. 이들을 함께 컴파일하면 기체에 올릴 **하나의 `.px4` 펌웨어**가 됩니다. PC에서 MAVLink를 해석해 서버로 전달하는 프로그램은 [HyRUS EnvData Router](https://github.com/VIPSfef/HyRUS_EnvData_Router)입니다.
 
-## 사용할 빌드 경로
+```mermaid
+flowchart LR
+    PX4["PX4 v1.16.1<br/>+ MAVLink 확장"] --> BUILD["함께 빌드"]
+    SENSOR["이 저장소<br/>SHTC3 외부 모듈"] --> BUILD
+    MODEL["사용자의 Simulink 모델<br/>생성된 제어 코드"] --> BUILD
+    BUILD --> FW["하나의 .px4 펌웨어"]
+    FW -->|MAVLink| ROUTER["PC의 Router"]
+    ROUTER -->|HTTP / UDP| SERVER["데이터 서버"]
+```
 
-| 목적 | 사용할 경로 |
-| --- | --- |
-| 제공된 포크 또는 직접 관리하는 PX4를 빌드 | 두 저장소와 하위 모듈을 준비한 뒤 build.sh 또는 CMake 직접 실행 |
-| 기록된 커밋 조합의 테스트·검증 보고서 생성 | firmware.py prepare와 validate.py |
-| 다른 PX4 버전·커스텀 브랜치에 MAVLink 확장만 이식 | 아래 addon 태그의 단일 커밋을 cherry-pick한 뒤 직접 빌드 |
+> **처음 사용하는 PC라면 [R2026b 설치·빌드·Simulink 연결 안내](docs/simulink-r2026b.md)부터 읽으세요.** 아래 명령은 개발 환경이 준비된 Ubuntu/WSL 터미널에서 실행하는 빠른 빌드 경로입니다. 실제 Simulink 모델의 코드 생성·기체 부팅·비행 시험은 별도 확인 대상입니다.
 
-**build.sh는 지정한 PX4 작업본을 그대로 빌드합니다.** Git 브랜치·커밋을 옮기거나 소스를 다운로드·수정하지 않습니다. project.json의 보드 타깃을 기본값으로 사용하며 --target으로 바꿀 수 있습니다.
+## 어떤 저장소와 브랜치를 쓰나요?
 
-반면 firmware.py prepare는 재현 가능한 검증을 위해 project.json의 포크 커밋을 선택합니다. 다른 커스텀 펌웨어를 그대로 빌드할 때는 직접 빌드 경로를 사용하세요.
+| 대상 | 역할 | 이 작업에서 사용할 것 |
+| --- | --- | --- |
+| `HyRUS_EnvData_Px4` | 센서 드라이버·진단·빌드 도구·문서 | `main` |
+| `Firmware` | PX4 본체와 MAVLink 확장 | `hyrus/r2026b` — 공식 v1.16.1 기반 |
+| 사용자의 모델 저장소 | `.slx`, 데이터 사전, 사용자 제어 코드 | 사용자가 별도 관리 |
+| `HyRUS_EnvData_Router` | MAVLink 수신, HTTP·UDP 서버 전송 | PC에서 별도로 실행 |
 
-## 처음 받기와 개발 환경 준비
+`Firmware/hyrus/mavlink`는 최신 공식 `main`을 추적하는 개발 브랜치입니다. R2026b 작업은 `hyrus/r2026b`를 사용합니다. MATLAB 릴리스마다 지원 PX4 버전이 다르기 때문입니다. [MathWorks R2026b의 PX4 버전 지침](https://www.mathworks.com/help/uav/px4/ug/downloading-px4-source-code-wsl2.html)
 
-Ubuntu 24.04 또는 WSL2 Ubuntu의 **Linux 파일시스템**에서 실행합니다. 아래는 새 폴더에 두 저장소를 받는 순서입니다.
+## 빠른 빌드
 
-~~~sh
-sudo apt update
-sudo apt install -y git
+WSL에서는 `/mnt/c` 아래 대신 **Linux 홈 폴더**에 받습니다. 아래 명령은 두 폴더가 아직 없는 새 작업 위치를 기준으로 합니다.
 
+```sh
 mkdir -p "$HOME/src"
 cd "$HOME/src"
 
 git clone https://github.com/VIPSfef/HyRUS_EnvData_Px4.git
-git clone --filter=blob:none --single-branch --branch hyrus/mavlink \
-  https://github.com/VIPSfef/Firmware.git PX4-HyRUS-Fork
+git clone --filter=blob:none --single-branch --branch hyrus/r2026b \
+  https://github.com/VIPSfef/Firmware.git PX4-HyRUS-R2026b
 
-HYRUS_PX4_DIR="$HOME/src/PX4-HyRUS-Fork"
+HYRUS_PX4_DIR="$HOME/src/PX4-HyRUS-R2026b"
 
-# 공식 태그는 PX4 버전 정보 생성에 사용합니다.
+# PX4가 빌드 시 사용할 공식 버전 태그와 하위 모듈을 준비합니다.
 git -C "$HYRUS_PX4_DIR" fetch --no-recurse-submodules --filter=blob:none --tags \
-  https://github.com/PX4/PX4-Autopilot.git main
+  https://github.com/PX4/PX4-Autopilot.git refs/tags/v1.16.1
 git -C "$HYRUS_PX4_DIR" submodule update --init --recursive
 
-# 개발 환경을 처음 준비할 때 실행합니다.
-bash "$HYRUS_PX4_DIR/Tools/setup/ubuntu.sh" --no-sim-tools
-
 cd "$HOME/src/HyRUS_EnvData_Px4"
-~~~
-
-개발 의존성은 Git, CMake·Ninja·Make, ARM GCC·newlib, 호스트 C/C++ 컴파일러, Python 3와 PX4 요구 패키지입니다. 공식 ubuntu.sh가 이를 설치하며 sudo를 사용할 수 있습니다.
-
-**Python은 PX4 자체의 빌드 의존성**입니다. CMake가 MAVLink·uORB·파라미터 코드 생성과 펌웨어 패키징에 사용합니다. 센서가 기체에서 Python으로 실행되는 것은 아닙니다. 이 저장소의 firmware.py·validate.py는 추가 준비·검증 도구이므로 직접 빌드에서는 실행하지 않아도 됩니다.
-
-## 스크립트로 빌드
-
-외부 모듈 저장소 루트에서 실행합니다.
-
-~~~sh
 bash Tools/hyrus/build.sh \
-  --px4-dir "$HOME/src/PX4-HyRUS-Fork" \
+  --px4-dir "$HYRUS_PX4_DIR" \
+  --target px4_fmu-v6c_default \
   --jobs 6
-~~~
+```
 
-스크립트 내부 순서는 **도구·하위 모듈 확인 → 기존 CMake 캐시 확인 → CMake configure → CMake build → 펌웨어 경로 출력**입니다. 다른 소스·외부 모듈·보드 타깃으로 만든 캐시를 잘못 재사용하면 중단합니다.
+결과 파일:
+
+```text
+~/src/PX4-HyRUS-R2026b/build/px4_fmu-v6c_default/px4_fmu-v6c_default.px4
+```
+
+이 명령은 현재 PX4 소스와 센서 외부 모듈을 빌드합니다. Simulink 모델을 자동으로 생성하거나 기체에 업로드하지는 않습니다. 모델을 함께 넣는 순서는 [Simulink 연결 안내](docs/simulink-r2026b.md)에 있습니다.
+
+### 빌드 스크립트 옵션
+
+`build.sh`는 **도구·하위 모듈 확인 → 기존 캐시 확인 → CMake 설정 → 컴파일·링크 → 결과 경로 출력** 순서로 동작합니다. Git 브랜치·커밋이나 사용자 소스를 바꾸지 않습니다.
 
 | 옵션 | 의미 |
 | --- | --- |
-| --px4-dir PATH | 빌드할 PX4 Git 작업본. 생략하면 이 저장소의 build/px4 |
-| --target BOARD | PX4 보드 타깃. 기본값은 project.json의 px4_fmu-v6c_default |
-| --build-dir PATH | 출력 폴더. 기본값은 PX4경로/build/보드타깃 |
-| --jobs N | 병렬 작업 수. 생략하면 사용 가능한 CPU 수 |
-| --configure-only | CMake 설정까지만 실행 |
-| --help | 사용법 표시 |
-| -- -DNAME=VALUE | 추가 CMake 정의 전달. 소스·외부 모듈·타깃 덮어쓰기는 허용하지 않음 |
+| `--px4-dir PATH` | 빌드할 PX4 작업본. 생략하면 이 저장소의 `build/px4` |
+| `--target BOARD` | 보드 구성. 기본값 `px4_fmu-v6c_default` |
+| `--build-dir PATH` | 출력 폴더. 기본값 `PX4경로/build/보드구성` |
+| `--jobs N` | 병렬 작업 수. 생략하면 사용 가능한 CPU 수 |
+| `--configure-only` | CMake 설정까지만 실행 |
+| `--simulink` | HyRUS 연결을 복원하고 실제 빌드에서 Simulink·센서·MAVLink의 최종 링크 확인 |
+| `-- -DNAME=VALUE` | 추가 CMake 옵션 |
+| `--help` | 전체 사용법 |
 
-설정을 바꿀 때는 다음처럼 전달할 수 있습니다.
+예를 들어 `-- -DHYRUS_MAVLINK=OFF`를 전달하면 센서 모듈만 빌드합니다. CMake 옵션은 출력 폴더에 저장되므로 다시 켤 때는 `-- -DHYRUS_MAVLINK=ON`을 명시합니다. 다른 소스·보드·외부 모듈로 만든 캐시를 지정하면 새 `--build-dir`를 선택하도록 안내합니다.
 
-~~~sh
-bash Tools/hyrus/build.sh --px4-dir "$HOME/src/PX4-HyRUS-Fork" \
-  -- -DHYRUS_MAVLINK=OFF
-~~~
+### CMake를 직접 사용할 때
 
-CMake 옵션은 빌드 폴더에 저장됩니다. 위에서 확장을 껐다면 같은 폴더에서 다시 켤 때 `-- -DHYRUS_MAVLINK=ON`을 명시하세요. 옵션을 생략하면 이전 설정을 유지합니다.
-
-소스를 수정한 뒤에도 같은 빌드 명령으로 증분 빌드할 수 있습니다. 메모리가 부족하면 병렬 작업 수를 낮추세요. 다른 보드는 해당 보드가 센서 연결과 PX4 외부 모듈 API를 지원하는지 별도로 확인해야 합니다.
-
-## CMake로 직접 빌드
-
-스크립트가 수행하는 핵심 명령입니다.
-
-~~~sh
-HYRUS_PX4_DIR="$HOME/src/PX4-HyRUS-Fork"
+```sh
+HYRUS_PX4_DIR="$HOME/src/PX4-HyRUS-R2026b"
 HYRUS_MODULE_DIR="$HOME/src/HyRUS_EnvData_Px4"
 
 cmake -S "$HYRUS_PX4_DIR" \
@@ -94,127 +89,41 @@ cmake -S "$HYRUS_PX4_DIR" \
   -G Ninja \
   -DCONFIG=px4_fmu-v6c_default \
   -DCMAKE_BUILD_TYPE=MinSizeRel \
-  -DEXTERNAL_MODULES_LOCATION="$HYRUS_MODULE_DIR"
-
+  -DEXTERNAL_MODULES_LOCATION="$HYRUS_MODULE_DIR" \
+  -DHYRUS_MAVLINK=ON
 cmake --build "$HYRUS_PX4_DIR/build/px4_fmu-v6c_default" --parallel 6
-~~~
+```
 
-출력은 다음 파일입니다.
+별도의 `cmake --install`은 없습니다. Python은 PX4의 MAVLink·uORB·파라미터 생성과 펌웨어 포장에 필요한 **PC 빌드 도구**입니다. 기체에서는 컴파일된 C/C++ 코드가 실행됩니다. 우리 Python 준비·검증 도구는 일반 빌드의 필수 진입점이 아닙니다.
 
-~~~text
-~/src/PX4-HyRUS-Fork/build/px4_fmu-v6c_default/px4_fmu-v6c_default.px4
-~~~
+## 기존 PX4에 무엇을 추가하나요?
 
-이 단계는 펌웨어 파일을 생성합니다. 별도의 cmake --install 단계는 없으며 기체 업로드는 별도 작업입니다.
+- SHTC3 드라이버와 진단 명령은 PX4 소스 트리 밖에서 관리합니다.
+- MAVLink는 기존 메시지 구성과 기본 스트림을 유지하면서 `SENS_ATMOS`를 추가합니다.
+- `HYGROMETER_SENSOR`의 습도 단위를 맞추는 수정은 별도 커밋으로 관리합니다.
+- 비행 제어·보드 설정·PX4 기본 부팅 코드는 HyRUS의 MAVLink 이식 대상이 아닙니다.
 
-## MAVLink 확장이 추가하는 것
+R2026b용 포크에는 v1.16.1에 맞춘 추가분이 이미 들어 있습니다. 추가분만 필요하면 `hyrus-mavlink-addon-px4-v1.16.1` 태그를 사용합니다. 다른 PX4 버전으로 옮기는 기준과 원래 main용 `hyrus-mavlink-addon-v1` 태그의 용도는 [포크·브랜치 안내](docs/fork-comparison.md)를 보세요. 모든 버전에 무수정으로 적용된다는 의미는 아닙니다.
 
-- 기존 펌웨어가 선택한 MAVLink dialect를 유지하고, SENS_ATMOS를 제공하는 ASLUAV 정의를 함께 포함한 wrapper를 생성합니다.
-- 기존 HYGROMETER_SENSOR 기본 스트림을 유지하면서 SENS_ATMOS 스트림을 등록하고 USB/config·onboard 기본 송신에 추가합니다.
-- 보드 설정, 비행 제어, 정상 부팅 코드를 변경하지 않습니다. 센서는 외부 모듈로 연결합니다.
-- 포크 자체의 HYRUS_MAVLINK 옵션 기본값은 꺼짐입니다. 이 외부 모듈을 연결하면 기본으로 켜며, 명시한 -DHYRUS_MAVLINK=OFF를 존중합니다.
+## 검증과 업데이트
 
-다른 펌웨어로 옮기는 addon 태그는 MAVLink 경로 여섯 파일의 순수 추가분이며 기존 HYGROMETER_SENSOR 처리를 바꾸지 않습니다. 검증용 hyrus/mavlink 추적 브랜치에는 이와 별개로 **HYGROMETER_SENSOR의 습도 단위를 공식 MAVLink 규격인 0.01 %RH에 맞추는 수정**도 유지합니다. 이 수정은 별도 커밋이며 addon 태그에 포함하지 않습니다. 다른 버전에는 해당 단위 문제가 있는지 확인한 뒤 별도로 반영합니다.
+두 경로를 구분합니다.
 
-기존 PX4 위에 필요한 송신 기능을 추가하는 구조입니다. 다만 **다른 PX4 버전의 API까지 자동으로 호환된다는 뜻은 아닙니다.** uORB 필드, 스트림 등록 위치, CMake 또는 메시지 정의가 바뀌면 이식 수정과 빌드 검사가 필요합니다. ArduPilot 등 다른 펌웨어 계열은 별도 구현 대상입니다.
-
-## 다른 PX4 버전·커스텀 브랜치에 확장만 이식
-
-[포크의 hyrus-mavlink-addon-v1 태그](https://github.com/VIPSfef/Firmware/tree/hyrus-mavlink-addon-v1)는 공식 기준에 대한 **MAVLink 추가분만 담은 단일 커밋**을 가리킵니다. 사용자가 관리하는 PX4 브랜치에서 새 통합 브랜치를 만든 뒤 그 커밋만 가져옵니다.
-
-아래 명령은 **사용할 PX4 저장소의 원하는 브랜치를 이미 선택하고, 변경 사항을 커밋한 상태**에서 실행합니다.
-
-~~~sh
-# 사용자 PX4 저장소 안에서 실행
-git status --short
-git switch -c surveyor-integration
-
-git fetch https://github.com/VIPSfef/Firmware.git \
-  refs/tags/hyrus-mavlink-addon-v1
-git cherry-pick FETCH_HEAD
-
-git submodule update --init --recursive
-
-bash "$HOME/src/HyRUS_EnvData_Px4/Tools/hyrus/build.sh" \
-  --px4-dir "$PWD" \
-  --target px4_fmu-v6c_default \
-  --jobs 6
-~~~
-
-git status --short에 변경이 표시되면 먼저 정리하고 진행하세요. Cherry-pick 충돌이 발생하면 그 버전의 API에 맞춰 해결하거나 git cherry-pick --abort로 이식 시도를 취소합니다.
-
-**추가 기능만 옮기려는 경우 git merge hyrus/mavlink를 사용하지 않습니다.** 추적 브랜치 전체를 병합하면 그 브랜치가 포함한 공식 PX4 업데이트도 함께 들어옵니다. Addon 태그를 cherry-pick하면 사용자가 선택한 펌웨어 이력을 유지하면서 해당 커밋의 변경만 적용합니다.
-
-이식 이후에는 사용자가 선택한 펌웨어의 원본 브랜치를 surveyor-integration에 병합해 업데이트합니다. MAVLink 확장 커밋을 유지하고 다시 빌드·시험합니다. 새 addon 버전을 적용할 때는 이미 들어간 확장과의 차이를 검토해야 합니다.
-
-## Simulink로 만든 PX4 커스텀 펌웨어와 함께 사용
-
-이 경우 기준 펌웨어는 **사용하는 MATLAB 릴리스와 PX4 지원 패키지가 요구하는 버전**입니다. 공식 main 추적용 작업본과 별도의 Git 브랜치·작업 폴더에서 관리합니다. 예를 들어 2026-10-27에 확인한 MathWorks R2026b 문서는 PX4 v1.16.1을 요구합니다. 실제 설치한 릴리스의 지침을 먼저 확인하세요. [MathWorks의 PX4 소스 준비 지침](https://www.mathworks.com/help/uav/px4/ug/downloading-px4-source-code-wsl2.html)
-
-MathWorks 지원 패키지는 Simulink 생성 코드를 `px4_simulink_app` 모듈로 넣고, 선택한 보드의 빌드 구성과 부팅 절차에 연결합니다. 여기에 HyRUS 센서 외부 모듈과 MAVLink 확장을 함께 포함해 **하나의 펌웨어**로 빌드하는 것이 통합 목표입니다. [MathWorks의 PX4 통합 구조](https://www.mathworks.com/help/uav/px4/ug/px4-capabilities-integration.html)
-
-~~~mermaid
-flowchart TD
-    RELEASE[MATLAB 릴리스가 지원하는 PX4 버전] --> SOURCE[Simulink 전용 PX4 작업본]
-    MODEL[Simulink 모델] --> GENERATED[생성 코드와 px4_simulink_app 등록]
-    GENERATED --> SOURCE
-    ADDON[해당 버전에 이식·검증한 MAVLink 확장] --> SOURCE
-    SOURCE --> BUILD[같은 보드 구성으로 전체 빌드]
-    SENSOR[HyRUS 센서 외부 모듈] --> BUILD
-    BUILD --> IMAGE[Simulink 제어 + 센서 + MAVLink가 포함된 .px4]
-    IMAGE --> START[부팅 시 필요한 모듈·통신 시작 확인]
-~~~
-
-연결 순서는 다음과 같습니다.
-
-1. MathWorks Hardware Setup에서 해당 릴리스의 PX4 작업본·도구 모음·보드 구성을 준비합니다. 모델 원본과 사용자 변경을 Git으로 보존합니다.
-2. 그 PX4 버전에 MAVLink addon을 이식하고 API·메시지 정의 차이를 확인합니다. 현재 addon 태그가 모든 MathWorks 지원 버전에 그대로 적용된다고 가정하지 않습니다.
-3. Simulink가 생성 모듈을 등록한 **같은 PX4 작업본과 보드 구성**에 HyRUS 외부 모듈을 연결합니다. `build.sh --px4-dir ... --target ...`는 이미 준비된 소스를 빌드할 수 있지만, Simulink 코드 생성이나 지원 패키지의 빌드 훅 설정은 수행하지 않습니다.
-4. 최종 펌웨어에 `px4_simulink_app`, `shtc3`, MAVLink 확장이 함께 들어갔는지 확인합니다. 현재 `validate.py`는 고정된 main 기반 조합의 센서·MAVLink를 검사하며, Simulink 모듈 포함 여부는 검사하지 않습니다. Simulink 작업본에는 커밋을 바꾸는 `firmware.py prepare`와 이를 내부에서 실행하는 `validate.py`를 실행하지 않습니다.
-5. 선택한 부팅 절차에 센서 시작과 MAVLink 송신을 연결합니다. 기본 `extras.txt` 훅이 사용자 `rc.txt`에서도 실행되는지는 별도로 확인합니다.
-
-MathWorks의 사용자 부팅 스크립트는 USB를 사용하는 External Mode를 위해 MAVLink를 비활성화할 수 있습니다. 이 모드에서는 Router로 전송할 MAVLink 실행과 포트 배치를 따로 정해야 합니다. 우리 부팅 예제로 Simulink 부팅 스크립트를 덮어쓰지 않습니다. [사용자 부팅 스크립트의 동작](https://www.mathworks.com/help/uav/px4/ug/custom-startup-script.html)
-
-현재 빌드 스크립트는 `EXTERNAL_MODULES_LOCATION` 하나를 HyRUS에 지정합니다. 다른 사용자 모듈이 이미 그 설정을 사용한다면 두 외부 모듈 묶음을 함께 등록하는 통합 구성이 추가로 필요합니다. Simulink가 공식 문서처럼 PX4 트리 내부에 생성 모듈을 넣는 경우에도, 해당 릴리스의 실제 생성·재빌드 과정에서 설정이 유지되는지 확인해야 합니다.
-
-**현재 검증 범위에는 실제 Simulink 모델의 코드 생성·통합 빌드·부팅 시험이 포함되지 않습니다.** 공식 main 호환성 검사는 계속 유지하며, Simulink 호환성은 MATLAB 릴리스·지원 패키지·PX4 커밋·보드·모델의 조합으로 별도 검증합니다.
-
-## 고정된 조합 검증과 자동 업데이트 검사
-
-제공된 조합을 재현하고 검증 보고서를 만들 때는 외부 모듈 저장소 루트에서 실행합니다.
-
-~~~sh
-HYRUS_PX4_DIR="$HOME/src/PX4-HyRUS-Verified"
-
-python3 Tools/hyrus/firmware.py prepare --px4-dir "$HYRUS_PX4_DIR"
-bash "$HYRUS_PX4_DIR/Tools/setup/ubuntu.sh" --no-sim-tools
-python3 Tools/hyrus/validate.py --px4-dir "$HYRUS_PX4_DIR" --jobs 6
-~~~
-
-이 검증은 커밋된 깨끗한 외부 모듈 작업본과 manifest에 기록된 포크를 대상으로 합니다. 임의의 사용자 커스텀 펌웨어를 이 기준으로 자동 승인하지 않습니다. 펌웨어·validation.json·단계별 로그는 외부 모듈 저장소의 build/hyrus-ci/에 모읍니다.
-
-hyrus-upstream.yml은 매일 **12:17 한국 시간**에 공식 main을 현재 포크에 시험 병합하고 호환성을 검사합니다. 실패하면 현재 기준을 유지하고, 성공하면 포크와 외부 모듈 후보를 Git bundle로 보관합니다. 원격 브랜치 반영은 검토 후 진행합니다. 검사 범위와 명령은 [CI.md](Tools/hyrus/CI.md)에 설명합니다.
-
-## 센서 시작
-
-자동 시작 예제는 외부 I2C **버스 2**, 주소 **0x70**의 SHTC3 한 개를 대상으로 합니다. 실제 보드·배선에 맞춰 버스 번호를 확인하세요. SENS_EN_SHTC3 기본값은 0이며 예제는 값이 1일 때만 드라이버를 시작합니다.
-
-sdcard/etc/extras.txt의 내용을 SD 카드의 /fs/microsd/etc/extras.txt에 기존 부팅 명령과 합쳐 넣습니다. 이 방식은 PX4의 rc.sensors를 수정하지 않습니다.
-
-## 소스와 문서
-
-| 위치 | 역할 |
+| 목적 | 경로 |
 | --- | --- |
-| src/drivers/hygrometer/shtc3/ | 센서 측정·복구·uORB 발행 |
-| src/systemcmds/shtc3_probe/ | I2C 진단 명령 |
-| src/CMakeLists.txt | 공식 외부 모듈 등록과 MAVLink 확장 선택 |
-| Tools/hyrus/build.sh | 직접 CMake 빌드 |
-| Tools/hyrus/project.json | 검증할 공식 기준·포크·보드 지정 |
-| test/hyrus/ | 센서·스트림·패킷 검사 |
-| 포크의 src/modules/mavlink/ | 선택 가능한 MAVLink 확장 |
+| 사용자 또는 Simulink가 수정한 작업본을 그대로 빌드 | `build.sh --px4-dir ...` |
+| 기록된 R2026b 조합을 새 전용 폴더에서 재현·검증 | `firmware.py prepare --profile r2026b`와 `validate.py --profile r2026b` |
+| 공식 `main` 변경의 호환성을 미리 확인 | 기존 `main` 프로필과 매일 실행되는 upstream 검사 |
 
-- [전체 빌드·데이터·실패 흐름](docs/architecture.md)
-- [포크 갱신과 브랜치·addon 태그의 역할](docs/fork-comparison.md)
-- [자동 검사 운영 절차](Tools/hyrus/CI.md)
-- [PX4 공식 외부 모듈 지침](https://docs.px4.io/main/en/advanced/out_of_tree_modules)
-- [PX4 공식 개발 환경](https://docs.px4.io/main/en/dev_setup/dev_env_linux_ubuntu)
+고정 조합 검증 도구는 프로필에 기록된 PX4 커밋을 선택합니다. **Simulink 생성 코드나 사용자 변경이 있는 작업본에는 실행하지 마세요.** 별도의 깨끗한 폴더에서 사용합니다. 명령과 검사 범위는 [CI 운영 안내](Tools/hyrus/CI.md)에 있습니다.
+
+R2026b 기준은 [`Tools/hyrus/profiles/r2026b.json`](Tools/hyrus/profiles/r2026b.json), 최신 main 기준은 [`Tools/hyrus/project.json`](Tools/hyrus/project.json)에 기록합니다. 공식 main의 검사 성공이 R2026b용 기준을 자동으로 올리지는 않습니다.
+
+## 다음에 읽을 문서
+
+| 문서 | 설명 |
+| --- | --- |
+| [R2026b 설치·빌드·Simulink 연결](docs/simulink-r2026b.md) | 다른 PC에서 처음 시작하는 순서, 모델 연결, 부팅·통신 설정 |
+| [구조와 데이터 흐름](docs/architecture.md) | 저장소 관계도, 빌드 흐름도, 센서 데이터가 서버까지 가는 경로 |
+| [포크·브랜치 안내](docs/fork-comparison.md) | v1.16.1과 main의 분리, 추가분 이식, 이전 포크 조사 기록 |
+| [CI 운영 안내](Tools/hyrus/CI.md) | 고정 커밋 검증, 결과 보고서, 공식 main 업데이트 검사 |
